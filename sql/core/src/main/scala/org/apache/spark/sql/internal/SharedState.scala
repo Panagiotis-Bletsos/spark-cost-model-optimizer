@@ -82,7 +82,7 @@ private[sql] class SharedState(val sparkContext: SparkContext) extends Logging {
       sparkContext.conf.set("hive.metastore.warehouse.dir", tempConf.warehousePath)
     }
 
-    logInfo(s"Warehouse path is '${tempConf.warehousePath}'.")
+    logInfo(s"Warehouse path is!! '${tempConf.warehousePath}'.")
   }
 
   /**

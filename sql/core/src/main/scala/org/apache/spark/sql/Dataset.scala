@@ -32,6 +32,7 @@ import org.apache.spark.api.java.JavaRDD
 import org.apache.spark.api.java.function._
 import org.apache.spark.api.python.PythonRDD
 import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst._
 import org.apache.spark.sql.catalyst.analysis._
@@ -156,7 +157,7 @@ class Dataset[T] private[sql](
     @transient val sparkSession: SparkSession,
     @DeveloperApi @transient val queryExecution: QueryExecution,
     encoder: Encoder[T])
-  extends Serializable {
+  extends Serializable with Logging {
 
   queryExecution.assertAnalyzed()
 
@@ -483,7 +484,10 @@ class Dataset[T] private[sql](
    * @group action
    * @since 1.6.0
    */
-  def show(numRows: Int): Unit = show(numRows, truncate = true)
+  def show(numRows: Int): Unit = {
+    logInfo("SHOOOOQ")
+    show(numRows, truncate = true)
+  }
 
   /**
    * Displays the top 20 rows of Dataset in a tabular form. Strings more than 20 characters

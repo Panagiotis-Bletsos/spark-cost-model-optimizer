@@ -166,6 +166,8 @@ public final class UnsafeExternalSorter extends MemoryConsumer {
         }
       }
     );
+
+    logger.info("** Create UnsafeExternalSorter");
   }
 
   /**
@@ -384,6 +386,7 @@ public final class UnsafeExternalSorter extends MemoryConsumer {
     throws IOException {
 
     assert(inMemSorter != null);
+    logger.info("In memory num of rec: " + String.valueOf(inMemSorter.numRecords()));
     if (inMemSorter.numRecords() >= numElementsForSpillThreshold) {
       logger.info("Spilling data because number of spilledRecords crossed the threshold " +
         numElementsForSpillThreshold);

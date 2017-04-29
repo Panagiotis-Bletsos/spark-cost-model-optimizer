@@ -112,6 +112,7 @@ case class ShuffleExchange(
 
   protected override def doExecute(): RDD[InternalRow] = attachTree(this, "execute") {
     // Returns the same ShuffleRowRDD if this plan is used by multiple plans.
+    logInfo("=======")
     if (cachedShuffleRDD == null) {
       cachedShuffleRDD = coordinator match {
         case Some(exchangeCoordinator) =>
@@ -123,6 +124,8 @@ case class ShuffleExchange(
           preparePostShuffleRDD(shuffleDependency)
       }
     }
+    logInfo("WE ARE HERE")
+    cachedShuffleRDD.toDebugString
     cachedShuffleRDD
   }
 }

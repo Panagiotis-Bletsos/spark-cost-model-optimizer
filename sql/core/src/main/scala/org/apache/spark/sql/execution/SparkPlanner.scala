@@ -18,6 +18,7 @@
 package org.apache.spark.sql.execution
 
 import org.apache.spark.SparkContext
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -28,7 +29,7 @@ class SparkPlanner(
     val sparkContext: SparkContext,
     val conf: SQLConf,
     val extraStrategies: Seq[Strategy])
-  extends SparkStrategies {
+  extends SparkStrategies with Logging {
 
   def numPartitions: Int = conf.numShufflePartitions
 

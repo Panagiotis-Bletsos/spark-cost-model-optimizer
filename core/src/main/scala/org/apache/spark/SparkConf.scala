@@ -377,6 +377,10 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging {
 
   /** Get a parameter as a long, falling back to a default if not set */
   def getLong(key: String, defaultValue: Long): Long = {
+    val sDv = defaultValue.toString
+    log.info(s"Default value for $key: $sDv")
+    val cv = getOption(key).map(_.toLong).getOrElse(defaultValue).toString
+    log.info(s"Computed value for $key: $cv")
     getOption(key).map(_.toLong).getOrElse(defaultValue)
   }
 

@@ -937,6 +937,7 @@ object CodeGenerator extends Logging {
     .build(
       new CacheLoader[CodeAndComment, GeneratedClass]() {
         override def load(code: CodeAndComment): GeneratedClass = {
+          logInfo(code.toString)
           val startTime = System.nanoTime()
           val result = doCompile(code)
           val endTime = System.nanoTime()
@@ -944,6 +945,9 @@ object CodeGenerator extends Logging {
           CodegenMetrics.METRIC_SOURCE_CODE_SIZE.update(code.body.length)
           CodegenMetrics.METRIC_COMPILATION_TIME.update(timeMs.toLong)
           logInfo(s"Code generated in $timeMs ms")
+          logTrace("TRACEE!")
+          logInfo(result.toString)
+          logDebug("HERE")
           result
         }
       })
