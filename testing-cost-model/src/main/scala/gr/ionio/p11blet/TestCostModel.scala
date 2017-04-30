@@ -26,18 +26,11 @@ import org.apache.spark.sql.execution.debug._
 object TestCostModel extends Logging {
 
   def main(args : Array[String]): Unit = {
-    if (args.isEmpty) throw new Exception("Must be at least 1 argument representing an SQL clause")
+    if (args.isEmpty) throw new IllegalArgumentException("Must be at least 1 argument " +
+      "representing an SQL clause")
+    if (args(0) == null) throw new IllegalArgumentException("First argument must be an SQL clause")
 
     new SparkContext().setLogLevel("DEBUG")
-
-    def isInDebugMode(arg: String) : Boolean = arg match {
-      case "true" => true
-      case "false" => false
-      case _ => throw new IllegalArgumentException("Second argument must be `true` or `false`")
-    }
-
-    if (args(0) == null) throw new Exception("First argument must be an SQL clause")
-    val debug = if (args.length == 2) isInDebugMode(args(1)) else false
 
     val sparkSession = SparkSession
       .builder()
@@ -47,6 +40,14 @@ object TestCostModel extends Logging {
       // .config("spark.shuffle.spill.numElementsForceSpillThreshold", 9000)
       .getOrCreate()
 
+    def isInDebugMode(arg: String) : Boolean = arg match {
+      case "true" => true
+      case "false" => false
+      case _ => throw new IllegalArgumentException("Second argument must be `true` or `false`")
+    }
+
+    val debug = if (args.length == 2) isInDebugMode(args(1)) else false
+
     driver(sparkSession, args(0), debug)
   }
 
@@ -55,6 +56,7 @@ object TestCostModel extends Logging {
                      debug: Boolean) : Unit = sqlClause match {
     case "select" => runSelectQuery(sparkSession, debug)
     case "join" => runJoinQuery(sparkSession, debug)
+    case _ => throw new IllegalArgumentException(s"Unknown clause: $sqlClause")
   }
 
   private def runSelectQuery(sparkSession: SparkSession, debug: Boolean) : Unit = {
