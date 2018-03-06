@@ -1073,8 +1073,8 @@ class DatasetSuite extends QueryTest with SharedSQLContext {
       val agg = cp.groupBy('id % 2).agg(count('id))
 
       agg.queryExecution.executedPlan.collectFirst {
-        case ShuffleExchange(_, _: RDDScanExec, _) =>
-        case BroadcastExchangeExec(_, _: RDDScanExec) =>
+        case ShuffleExchange(_, _: RDDScanExec, _, _) =>
+        case BroadcastExchangeExec(_, _: RDDScanExec, _) =>
       }.foreach { _ =>
         fail(
           "No Exchange should be inserted above RDDScanExec since the checkpointed Dataset " +

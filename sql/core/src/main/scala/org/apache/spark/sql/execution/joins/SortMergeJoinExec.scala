@@ -25,8 +25,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.physical._
-import org.apache.spark.sql.execution.{BinaryExecNode, CodegenSupport,
-ExternalAppendOnlyUnsafeRowArray, RowIterator, SparkPlan}
+import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 import org.apache.spark.util.collection.BitSet
 
@@ -39,7 +38,10 @@ case class SortMergeJoinExec(
     joinType: JoinType,
     condition: Option[Expression],
     left: SparkPlan,
-    right: SparkPlan) extends BinaryExecNode with CodegenSupport {
+    right: SparkPlan,
+    leftRowCount: Option[BigInt] = None,
+    rightRowCount: Option[BigInt] = None,
+    override val rowCount: Option[BigInt] = None) extends BinaryExecNode with CodegenSupport {
 
   override lazy val metrics = Map(
     "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"))
@@ -99,6 +101,20 @@ case class SortMergeJoinExec(
     case x =>
       throw new IllegalArgumentException(
         s"${getClass.getSimpleName} should not take $x as the JoinType")
+  }
+
+  override lazy val cost: PhysicalCost = {
+    if (rowCount.isDefined) {
+      val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
+      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
+      val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
+      val parallelization = math.max(numOfExecutors * ( coresPerExecutor / tasksPerCpu), 1)
+      val processingRowsInParallel =
+        (leftRowCount.get * rightRowCount.get / parallelization).toDouble
+      new PhysicalCost(processingRowsInParallel, 1, 1, 1)
+    } else {
+      new PhysicalCost(1, 1, 1, 1)
+    }
   }
 
   /**

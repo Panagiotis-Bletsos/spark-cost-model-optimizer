@@ -26,7 +26,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow
 import org.apache.spark.sql.catalyst.plans.physical.{BroadcastMode, BroadcastPartitioning, Partitioning}
-import org.apache.spark.sql.execution.{SparkPlan, SQLExecution}
+import org.apache.spark.sql.execution.{PhysicalCost, SparkPlan, SQLExecution}
 import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.execution.ui.SparkListenerDriverAccumUpdates
 import org.apache.spark.sql.internal.SQLConf
@@ -38,7 +38,8 @@ import org.apache.spark.util.ThreadUtils
  */
 case class BroadcastExchangeExec(
     mode: BroadcastMode,
-    child: SparkPlan) extends Exchange {
+    child: SparkPlan,
+    override val rowCount: Option[BigInt] = None) extends Exchange {
 
   override lazy val metrics = Map(
     "dataSize" -> SQLMetrics.createMetric(sparkContext, "data size (bytes)"),
@@ -50,6 +51,21 @@ case class BroadcastExchangeExec(
 
   override lazy val canonicalized: SparkPlan = {
     BroadcastExchangeExec(mode.canonicalized, child.canonicalized)
+  }
+
+  override lazy val cost: PhysicalCost = {
+    if (rowCount.isDefined) {
+      val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
+      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
+      val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
+      val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
+      val processingRowsInParallel = (rowCount.get / parallelization).toDouble
+      val cpuCost = processingRowsInParallel * sqlContext.conf.physicalCboHashingWeight
+      val rowSize = UnsafeRow.calculateFixedPortionByteSize(this.schema.fields.length)
+      new PhysicalCost(cpuCost, 1, 1, processingRowsInParallel * rowSize)
+    } else {
+      new PhysicalCost(1, 1, 1, 1)
+    }
   }
 
   @transient

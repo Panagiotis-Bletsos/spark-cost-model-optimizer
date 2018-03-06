@@ -67,7 +67,7 @@ case class EnsureRequirements(conf: SQLConf) extends Rule[SparkPlan] {
       if (children.exists(_.isInstanceOf[ShuffleExchange])) {
         // Right now, ExchangeCoordinator only support HashPartitionings.
         children.forall {
-          case e @ ShuffleExchange(hash: HashPartitioning, _, _) => true
+          case e @ ShuffleExchange(hash: HashPartitioning, _, _, _) => true
           case child =>
             child.outputPartitioning match {
               case hash: HashPartitioning => true
@@ -160,9 +160,12 @@ case class EnsureRequirements(conf: SQLConf) extends Rule[SparkPlan] {
       case (child, distribution) if child.outputPartitioning.satisfies(distribution) =>
         child
       case (child, BroadcastDistribution(mode)) =>
-        BroadcastExchangeExec(mode, child)
+        BroadcastExchangeExec(mode, child, rowCount = operator.rowCount)
       case (child, distribution) =>
-        ShuffleExchange(createPartitioning(distribution, defaultNumPreShufflePartitions), child)
+        ShuffleExchange(
+          createPartitioning(distribution, defaultNumPreShufflePartitions),
+          child,
+          rowCount = operator.rowCount)
     }
 
     // If the operator has multiple children and specifies child output distributions (e.g. join),
@@ -215,8 +218,9 @@ case class EnsureRequirements(conf: SQLConf) extends Rule[SparkPlan] {
               child match {
                 // If child is an exchange, we replace it with
                 // a new one having targetPartitioning.
-                case ShuffleExchange(_, c, _) => ShuffleExchange(targetPartitioning, c)
-                case _ => ShuffleExchange(targetPartitioning, child)
+                case ShuffleExchange(_, c, _, rowCount) =>
+                  ShuffleExchange(targetPartitioning, c, rowCount = rowCount)
+                case _ => ShuffleExchange(targetPartitioning, child, rowCount = operator.rowCount)
               }
           }
         }
@@ -246,7 +250,7 @@ case class EnsureRequirements(conf: SQLConf) extends Rule[SparkPlan] {
         }
 
         if (!orderingMatched) {
-          SortExec(requiredOrdering, global = false, child = child)
+          SortExec(requiredOrdering, global = false, child = child, rowCount = operator.rowCount)
         } else {
           child
         }
@@ -259,9 +263,9 @@ case class EnsureRequirements(conf: SQLConf) extends Rule[SparkPlan] {
   }
 
   def apply(plan: SparkPlan): SparkPlan = plan.transformUp {
-    case operator @ ShuffleExchange(partitioning, child, _) =>
+    case operator @ ShuffleExchange(partitioning, child, _, _) =>
       child.children match {
-        case ShuffleExchange(childPartitioning, baseChild, _)::Nil =>
+        case ShuffleExchange(childPartitioning, baseChild, _, _)::Nil =>
           if (childPartitioning.guarantees(partitioning)) child else operator
         case _ => operator
       }

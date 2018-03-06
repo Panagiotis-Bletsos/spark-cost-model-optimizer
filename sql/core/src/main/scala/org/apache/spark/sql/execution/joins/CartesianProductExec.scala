@@ -59,7 +59,8 @@ class UnsafeCartesianRDD(
 case class CartesianProductExec(
     left: SparkPlan,
     right: SparkPlan,
-    condition: Option[Expression]) extends BinaryExecNode {
+    condition: Option[Expression],
+    override val rowCount: Option[BigInt] = None) extends BinaryExecNode {
   override def output: Seq[Attribute] = left.output ++ right.output
 
   override lazy val metrics = Map(

@@ -31,7 +31,7 @@ import org.apache.spark.sql.execution
 import org.apache.spark.sql.execution.columnar.{InMemoryRelation, InMemoryTableScanExec}
 import org.apache.spark.sql.execution.command._
 import org.apache.spark.sql.execution.exchange.ShuffleExchange
-import org.apache.spark.sql.execution.joins.{BuildLeft, BuildRight}
+import org.apache.spark.sql.execution.joins.{BuildLeft, BuildRight, PlanLaterJoin}
 import org.apache.spark.sql.execution.streaming._
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.streaming.StreamingQuery
@@ -153,6 +153,24 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
     def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
 
+      case ExtractEquiJoinKeys(joinType, leftKeys, rightKeys, condition, left, right)
+        if conf.physicalCboOptimizerEnabled &&
+          canBuildRight(joinType) &&
+          canBroadcast(right) &&
+          RowOrdering.isOrderable(leftKeys) =>
+        Seq(PlanLaterJoin(
+          leftKeys, rightKeys, joinType, BuildRight, condition, planLater(left), planLater(right),
+          left.stats(conf).rowCount, right.stats(conf).rowCount, plan.stats(conf).rowCount))
+
+      case ExtractEquiJoinKeys(joinType, leftKeys, rightKeys, condition, left, right)
+        if conf.physicalCboOptimizerEnabled &&
+          canBuildLeft(joinType) &&
+          canBroadcast(left) &&
+          RowOrdering.isOrderable(leftKeys) =>
+        Seq(PlanLaterJoin(
+          leftKeys, rightKeys, joinType, BuildLeft, condition, planLater(left), planLater(right),
+          left.stats(conf).rowCount, right.stats(conf).rowCount, plan.stats(conf).rowCount))
+
       // --- BroadcastHashJoin --------------------------------------------------------------------
 
       case ExtractEquiJoinKeys(joinType, leftKeys, rightKeys, condition, left, right)
@@ -172,14 +190,16 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
            && muchSmaller(right, left) ||
            !RowOrdering.isOrderable(leftKeys) =>
         Seq(joins.ShuffledHashJoinExec(
-          leftKeys, rightKeys, joinType, BuildRight, condition, planLater(left), planLater(right)))
+          leftKeys, rightKeys, joinType, BuildRight, condition, planLater(left), planLater(right),
+          rowCount = plan.stats(conf).rowCount))
 
       case ExtractEquiJoinKeys(joinType, leftKeys, rightKeys, condition, left, right)
          if !conf.preferSortMergeJoin && canBuildLeft(joinType) && canBuildLocalHashMap(left)
            && muchSmaller(left, right) ||
            !RowOrdering.isOrderable(leftKeys) =>
         Seq(joins.ShuffledHashJoinExec(
-          leftKeys, rightKeys, joinType, BuildLeft, condition, planLater(left), planLater(right)))
+          leftKeys, rightKeys, joinType, BuildLeft, condition, planLater(left), planLater(right),
+          rowCount = plan.stats(conf).rowCount))
 
       // --- SortMergeJoin ------------------------------------------------------------
 
@@ -194,15 +214,18 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
       case j @ logical.Join(left, right, joinType, condition)
           if canBuildRight(joinType) && canBroadcast(right) =>
         joins.BroadcastNestedLoopJoinExec(
-          planLater(left), planLater(right), BuildRight, joinType, condition) :: Nil
+          planLater(left), planLater(right), BuildRight, joinType, condition,
+          rowCount = plan.stats(conf).rowCount) :: Nil
       case j @ logical.Join(left, right, joinType, condition)
           if canBuildLeft(joinType) && canBroadcast(left) =>
         joins.BroadcastNestedLoopJoinExec(
-          planLater(left), planLater(right), BuildLeft, joinType, condition) :: Nil
+          planLater(left), planLater(right), BuildLeft, joinType, condition,
+          rowCount = plan.stats(conf).rowCount) :: Nil
 
       // Pick CartesianProduct for InnerJoin
       case logical.Join(left, right, _: InnerLike, condition) =>
-        joins.CartesianProductExec(planLater(left), planLater(right), condition) :: Nil
+        joins.CartesianProductExec(planLater(left), planLater(right), condition,
+          rowCount = plan.stats(conf).rowCount) :: Nil
 
       case logical.Join(left, right, joinType, condition) =>
         val buildSide =
@@ -213,7 +236,8 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
           }
         // This join could be very slow or OOM
         joins.BroadcastNestedLoopJoinExec(
-          planLater(left), planLater(right), buildSide, joinType, condition) :: Nil
+          planLater(left), planLater(right), buildSide, joinType, condition,
+          rowCount = plan.stats(conf).rowCount) :: Nil
 
       // --- Cases where this strategy does not apply ---------------------------------------------
 
@@ -393,12 +417,16 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
 
       case logical.Repartition(numPartitions, shuffle, child) =>
         if (shuffle) {
-          ShuffleExchange(RoundRobinPartitioning(numPartitions), planLater(child)) :: Nil
+          ShuffleExchange(
+            RoundRobinPartitioning(numPartitions),
+            planLater(child),
+            plan.stats(conf).rowCount) :: Nil
         } else {
           execution.CoalesceExec(numPartitions, planLater(child)) :: Nil
         }
       case logical.Sort(sortExprs, global, child) =>
-        execution.SortExec(sortExprs, global, planLater(child)) :: Nil
+        execution.SortExec(
+          sortExprs, global, planLater(child), rowCount = plan.stats(conf).rowCount) :: Nil
       case logical.Project(projectList, child) =>
         execution.ProjectExec(projectList, planLater(child)) :: Nil
       case logical.Filter(condition, child) =>
@@ -416,7 +444,8 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
       case logical.LocalLimit(IntegerLiteral(limit), child) =>
         execution.LocalLimitExec(limit, planLater(child)) :: Nil
       case logical.GlobalLimit(IntegerLiteral(limit), child) =>
-        execution.GlobalLimitExec(limit, planLater(child)) :: Nil
+        execution.GlobalLimitExec(
+          limit, planLater(child), rowCount = plan.stats(conf).rowCount) :: Nil
       case logical.Union(unionChildren) =>
         execution.UnionExec(unionChildren.map(planLater)) :: Nil
       case g @ logical.Generate(generator, join, outer, _, _, child) =>
@@ -428,8 +457,10 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
       case r: logical.Range =>
         execution.RangeExec(r) :: Nil
       case logical.RepartitionByExpression(expressions, child, numPartitions) =>
-        exchange.ShuffleExchange(HashPartitioning(
-          expressions, numPartitions), planLater(child)) :: Nil
+        exchange.ShuffleExchange(
+          HashPartitioning(expressions, numPartitions),
+          planLater(child),
+          plan.stats(conf).rowCount) :: Nil
       case ExternalRDD(outputObjAttr, rdd) => ExternalRDDScanExec(outputObjAttr, rdd) :: Nil
       case r: LogicalRDD =>
         RDDScanExec(r.output, r.rdd, "ExistingRDD", r.outputPartitioning, r.outputOrdering) :: Nil

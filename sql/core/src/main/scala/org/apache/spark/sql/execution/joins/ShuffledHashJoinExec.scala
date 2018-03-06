@@ -36,7 +36,8 @@ case class ShuffledHashJoinExec(
     buildSide: BuildSide,
     condition: Option[Expression],
     left: SparkPlan,
-    right: SparkPlan)
+    right: SparkPlan,
+    override val rowCount: Option[BigInt] = None)
   extends BinaryExecNode with HashJoin {
 
   override lazy val metrics = Map(

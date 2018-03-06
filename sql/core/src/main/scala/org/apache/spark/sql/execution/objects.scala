@@ -457,7 +457,8 @@ case class CoGroupExec(
     rightAttr: Seq[Attribute],
     outputObjAttr: Attribute,
     left: SparkPlan,
-    right: SparkPlan) extends BinaryExecNode with ObjectProducerExec {
+    right: SparkPlan,
+    override val rowCount: Option[BigInt] = None) extends BinaryExecNode with ObjectProducerExec {
 
   override def requiredChildDistribution: Seq[Distribution] =
     ClusteredDistribution(leftGroup) :: ClusteredDistribution(rightGroup) :: Nil

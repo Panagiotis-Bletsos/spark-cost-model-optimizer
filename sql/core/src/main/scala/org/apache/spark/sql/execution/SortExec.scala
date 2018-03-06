@@ -20,6 +20,7 @@ package org.apache.spark.sql.execution
 import org.apache.spark.{SparkEnv, TaskContext}
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
@@ -38,7 +39,8 @@ case class SortExec(
     sortOrder: Seq[SortOrder],
     global: Boolean,
     child: SparkPlan,
-    testSpillFrequency: Int = 0)
+    testSpillFrequency: Int = 0,
+    override val rowCount: Option[BigInt] = None)
   extends UnaryExecNode with CodegenSupport {
 
   override def output: Seq[Attribute] = child.output
@@ -58,6 +60,19 @@ case class SortExec(
     "sortTime" -> SQLMetrics.createTimingMetric(sparkContext, "sort time"),
     "peakMemory" -> SQLMetrics.createSizeMetric(sparkContext, "peak memory"),
     "spillSize" -> SQLMetrics.createSizeMetric(sparkContext, "spill size"))
+
+  override lazy val cost: PhysicalCost = {
+    if (rowCount.isDefined) {
+      val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
+      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
+      val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
+      val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
+      val processingRowsInParallel = (rowCount.get / parallelization).toDouble
+      new PhysicalCost(processingRowsInParallel * math.log(processingRowsInParallel), 1, 1, 1)
+    } else {
+      new PhysicalCost(1, 1, 1, 1)
+    }
+  }
 
   def createSorter(): UnsafeExternalRowSorter = {
     val ordering = newOrdering(sortOrder, output)

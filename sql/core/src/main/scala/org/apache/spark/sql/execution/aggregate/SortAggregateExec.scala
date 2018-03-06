@@ -37,7 +37,8 @@ case class SortAggregateExec(
     aggregateAttributes: Seq[Attribute],
     initialInputBufferOffset: Int,
     resultExpressions: Seq[NamedExpression],
-    child: SparkPlan)
+    child: SparkPlan,
+    override val rowCount: Option[BigInt])
   extends UnaryExecNode {
 
   private[this] val aggregateBufferAttributes = {

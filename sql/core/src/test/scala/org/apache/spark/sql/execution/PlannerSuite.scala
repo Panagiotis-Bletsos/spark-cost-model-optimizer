@@ -26,7 +26,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Repartition}
 import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution.columnar.InMemoryRelation
 import org.apache.spark.sql.execution.exchange.{EnsureRequirements, ReusedExchangeExec, ReuseExchange, ShuffleExchange}
-import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, SortMergeJoinExec}
+import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, PlanLaterJoin, SortMergeJoinExec}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.test.SharedSQLContext
@@ -459,8 +459,8 @@ class PlannerSuite extends SharedSQLContext {
       Literal(1) :: Nil,
       Inner,
       None,
-      ShuffleExchange(finalPartitioning, inputPlan),
-      ShuffleExchange(finalPartitioning, inputPlan))
+      ShuffleExchange(finalPartitioning, inputPlan, None),
+      ShuffleExchange(finalPartitioning, inputPlan, None))
 
     val outputPlan2 = ReuseExchange(spark.sessionState.conf).apply(inputPlan2)
     if (outputPlan2.collect { case e: ReusedExchangeExec => true }.size != 2) {
@@ -622,7 +622,234 @@ class PlannerSuite extends SharedSQLContext {
       requiredOrdering = Seq(orderingA, orderingB),
       shouldHaveSort = true)
   }
+
+  ///////////////////////////////////////////////////////////////
+  // Unit test to ensure physical cost optimizer
+  ///////////////////////////////////////////////////////////////
+
+  test("New query planner one join") {
+    def checkPlan(fieldTypes: Seq[DataType]): Unit = {
+      withTempView("testLimit") {
+        val fields = fieldTypes.zipWithIndex.map {
+          case (dataType, index) => StructField(s"c${index}", dataType, true)
+        } :+ StructField("key", IntegerType, true)
+        val schema = StructType(fields)
+        val row = Row.fromSeq(Seq.fill(fields.size)(null))
+        val rowRDD = sparkContext.parallelize(row :: Nil)
+        spark.createDataFrame(rowRDD, schema).createOrReplaceTempView("testLimit")
+
+        val planned = sql(
+          """
+            |SELECT l.a, l.b
+            |FROM testData2 l JOIN (SELECT * FROM testLimit LIMIT 1) r ON (l.a = r.key)
+          """.stripMargin).queryExecution.sparkPlan
+
+        val extractedPlanLaterJoins = CostBasedQueryPlanner(planned, spark.sessionState.conf)
+        assert(extractedPlanLaterJoins.size == 2)
+      }
+    }
+
+    val simpleTypes =
+      NullType ::
+        BooleanType ::
+        ByteType ::
+        ShortType ::
+        IntegerType ::
+        LongType ::
+        FloatType ::
+        DoubleType ::
+        DecimalType(10, 5) ::
+        DecimalType.SYSTEM_DEFAULT ::
+        DateType ::
+        TimestampType ::
+        StringType ::
+        BinaryType :: Nil
+
+    withSQLConf(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "16434",
+      SQLConf.PHYSICAL_COST_BASED_OPTIMIZER.key -> "true") {
+      checkPlan(simpleTypes)
+    }
+  }
+
+  test("New query planner two joins") {
+    withTempView("normal", "small", "tiny") {
+      testData.createOrReplaceTempView("normal")
+      testData.limit(10).createOrReplaceTempView("small")
+      testData.limit(3).createOrReplaceTempView("tiny")
+
+      // Disable broadcast join
+      withSQLConf(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "16434",
+        SQLConf.PHYSICAL_COST_BASED_OPTIMIZER.key -> "true") {
+        {
+          val plan = sql(
+            """
+              |SELECT *
+              |FROM
+              |  normal JOIN small ON (normal.key = small.key)
+              |  JOIN tiny ON (small.key = tiny.key)
+            """.stripMargin
+          ).queryExecution.sparkPlan
+
+          assert(CostBasedQueryPlanner(plan, spark.sessionState.conf).size == 4)
+        }
+      }
+    }
+  }
+
+  test("New query planner three joins") {
+    withTempView("normal", "small", "tiny", "normal2") {
+      testData.createOrReplaceTempView("normal")
+      testData.limit(10).createOrReplaceTempView("small")
+      testData.limit(3).createOrReplaceTempView("tiny")
+      testData.limit(50).createOrReplaceTempView("normal2")
+
+      // Disable broadcast join
+      withSQLConf(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "16434",
+        SQLConf.PHYSICAL_COST_BASED_OPTIMIZER.key -> "true") {
+        val plan = sql(
+          """
+            |SELECT *
+            |FROM normal
+            |JOIN small ON (normal.key = small.key)
+            |JOIN tiny ON (normal.key = tiny.key)
+            |JOIN normal2 ON (small.key = normal2.key)
+          """.stripMargin
+        ).queryExecution.sparkPlan
+
+        val plans = CostBasedQueryPlanner(plan, spark.sessionState.conf)
+
+        assert(plans.size == 8)
+      }
+    }
+  }
+
+  test("New query planner four joins") {
+    withTempView("normal", "small", "tiny", "normal2", "normal3") {
+      testData.createOrReplaceTempView("normal")
+      testData.limit(10).createOrReplaceTempView("small")
+      testData.limit(3).createOrReplaceTempView("tiny")
+      testData.limit(50).createOrReplaceTempView("normal2")
+      testData.limit(50).createOrReplaceTempView("normal3")
+
+      // Disable broadcast join
+      withSQLConf(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "16434",
+        SQLConf.PHYSICAL_COST_BASED_OPTIMIZER.key -> "true") {
+        val plan = sql(
+          """
+            |SELECT *
+            |FROM normal
+            |JOIN small ON (normal.key = small.key)
+            |JOIN tiny ON (normal.key = tiny.key)
+            |JOIN normal2 ON (small.key = normal2.key)
+            |JOIN normal3 ON (tiny.key = normal3.key)
+          """.stripMargin
+        ).queryExecution.sparkPlan
+
+        val plans = CostBasedQueryPlanner(plan, spark.sessionState.conf)
+
+        assert(plans.size == 16)
+      }
+    }
+  }
+
+  test("New query planner should respect conf") {
+    withTempView("normal", "small", "tiny", "normal2", "normal3") {
+      testData.createOrReplaceTempView("normal")
+      testData.limit(10).createOrReplaceTempView("small")
+      testData.limit(3).createOrReplaceTempView("tiny")
+      testData.limit(50).createOrReplaceTempView("normal2")
+      testData.limit(50).createOrReplaceTempView("normal3")
+
+      // Disable broadcast join
+      withSQLConf(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "16434",
+        SQLConf.PHYSICAL_COST_BASED_OPTIMIZER.key -> "true",
+        SQLConf.PHYSICAL_COST_BASED_OPTIMIZER_MAX_DEPTH.key -> "2") {
+        val plan = sql(
+          """
+            |SELECT *
+            |FROM normal
+            |JOIN small ON (normal.key = small.key)
+            |JOIN tiny ON (normal.key = tiny.key)
+            |JOIN normal2 ON (small.key = normal2.key)
+            |JOIN normal3 ON (tiny.key = normal3.key)
+          """.stripMargin
+        ).queryExecution.sparkPlan
+
+        val plans = CostBasedQueryPlanner(plan, spark.sessionState.conf)
+
+        assert(plans.size == 4)
+      }
+    }
+  }
+
+  test("New query planner should plan nested joins") {
+    withTempView("normal", "small", "tiny", "normal2", "normal3") {
+      testData2.createOrReplaceTempView("normal")
+      testData.limit(10).createOrReplaceTempView("small")
+      testData.limit(3).createOrReplaceTempView("tiny")
+      testData.limit(50).createOrReplaceTempView("normal2")
+      testData.limit(50).createOrReplaceTempView("normal3")
+
+      // Disable broadcast join
+      withSQLConf(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "16434",
+        SQLConf.PHYSICAL_COST_BASED_OPTIMIZER.key -> "true") {
+        val plan = sql(
+          """
+            |WITH p AS (
+            |  SELECT * FROM small
+            |  JOIN normal ON (normal.a = small.key)
+            |)
+            |SELECT *
+            |FROM p p1, p p2
+            |WHERE p1.key > 1
+            |AND p2.key > 2
+            |AND p1.key = p2.key
+          """.stripMargin
+        ).queryExecution.sparkPlan
+
+        val plans = CostBasedQueryPlanner(plan, spark.sessionState.conf)
+
+        assert(plans.size == 4)
+      }
+    }
+  }
+
+  test("New query planner should use same join") {
+    withTempView("normal", "small", "tiny", "normal2", "normal3") {
+      testData2.createOrReplaceTempView("normal")
+      testData.limit(10).createOrReplaceTempView("small")
+      testData.limit(3).createOrReplaceTempView("tiny")
+      testData.limit(50).createOrReplaceTempView("normal2")
+      testData.limit(50).createOrReplaceTempView("normal3")
+
+      // Disable broadcast join
+      withSQLConf(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "16434",
+        SQLConf.PHYSICAL_COST_BASED_OPTIMIZER.key -> "true",
+        SQLConf.PHYSICAL_COST_BASED_OPTIMIZER_MAX_DEPTH.key -> "1") {
+        val plan = sql(
+          """
+            |WITH p AS (
+            |  SELECT * FROM small
+            |  JOIN normal ON (normal.a = small.key)
+            |)
+            |SELECT *
+            |FROM p p1, p p2, tiny
+            |WHERE p1.key > 1
+            |AND p2.key > 2
+            |AND p1.key = p2.key
+            |AND p1.key = tiny.key
+          """.stripMargin
+        ).queryExecution.sparkPlan
+
+        val plans = CostBasedQueryPlanner(plan, spark.sessionState.conf)
+
+        assert(plans.size == 2)
+      }
+    }
+  }
 }
+
+
 
 // Used for unit-testing EnsureRequirements
 private case class DummySparkPlan(

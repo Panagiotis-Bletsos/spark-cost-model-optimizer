@@ -20,15 +20,21 @@ package org.apache.spark.sql.execution
 import java.nio.charset.StandardCharsets
 import java.sql.{Date, Timestamp}
 
+import scala.collection.mutable
+
+import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.UnsupportedOperationChecker
+import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReturnAnswer}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.execution.command.{DescribeTableCommand, ExecutedCommandExec, ShowTablesCommand}
 import org.apache.spark.sql.execution.exchange.{EnsureRequirements, ReuseExchange}
+import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, PlanLaterJoin, SortMergeJoinExec}
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{BinaryType, DateType, DecimalType, TimestampType, _}
 import org.apache.spark.util.Utils
 
@@ -39,7 +45,7 @@ import org.apache.spark.util.Utils
  * While this is not a public class, we should avoid changing the function names for the sake of
  * changing them, because a lot of developers use the feature for debugging.
  */
-class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) {
+class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) extends Logging {
 
   // TODO: Move the planner an optimizer into here from SessionState.
   protected def planner = sparkSession.sessionState.planner
@@ -84,9 +90,25 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) {
     planner.plan(ReturnAnswer(optimizedPlan)).next()
   }
 
+  lazy val optimalSparkPlan: SparkPlan = {
+    val startTime = System.nanoTime()
+    val plans = CostBasedQueryPlanner(sparkPlan, sparkSession.sessionState.conf)
+    val executedPlans = plans map prepareForExecution
+    val bestPlan = executedPlans.minBy(_.map(_.cost.get).sum)
+    val durationInMs = (System.nanoTime() - startTime) / (1000 * 1000)
+    logError(s"Optimal plan found. Duration: $durationInMs ms")
+    bestPlan
+  }
+
   // executedPlan should not be used to initialize any SparkPlan. It should be
   // only used for execution.
-  lazy val executedPlan: SparkPlan = prepareForExecution(sparkPlan)
+  lazy val executedPlan: SparkPlan = {
+    if (sparkSession.sqlContext.conf.physicalCboOptimizerEnabled) {
+      optimalSparkPlan
+    } else {
+      prepareForExecution(sparkPlan)
+    }
+  }
 
   /** Internal version of the RDD. Avoids copies and has no schema */
   lazy val toRdd: RDD[InternalRow] = executedPlan.execute()
@@ -244,5 +266,126 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) {
       println(org.apache.spark.sql.execution.debug.codegenString(executedPlan))
       // scalastyle:on println
     }
+  }
+}
+
+object CostBasedQueryPlanner extends Logging {
+  private case class PhysicalJoinCandidate(
+    broadcastHashJoinExec: BroadcastHashJoinExec,
+    sortMergeJoinExec: SortMergeJoinExec) {
+    def cross(other: PhysicalJoinCandidate): Seq[Seq[SparkPlan]] = {
+      for { x <- this.toSeq; y <- other.toSeq } yield Seq(x, y)
+    }
+
+    def cross(other: Seq[Seq[SparkPlan]]): Seq[Seq[SparkPlan]] = {
+      if (other.nonEmpty) {
+        val c: Seq[Seq[Any]] = for { x <- this.toSeq; y <- other } yield Seq(x, y)
+        c.map(_.flatMap {
+          case s: Seq[SparkPlan] => s.flatMap(Seq(_))
+          case sp: SparkPlan => Seq(sp)
+        })
+      } else {
+        Seq(Seq(this.broadcastHashJoinExec), Seq(this.sortMergeJoinExec))
+      }
+    }
+
+    private def toSeq: Seq[SparkPlan] = Seq(broadcastHashJoinExec, sortMergeJoinExec)
+  }
+
+  private def extractPhysicalJoinCandidates(sparkPlan: SparkPlan): Seq[PhysicalJoinCandidate] = {
+    sparkPlan match {
+      case plj @ PlanLaterJoin(leftKeys, rightKeys, joinType, buildSide, condition, left, right,
+      leftRowCount, rightRowCount, rowCount) =>
+        extractPhysicalJoinCandidates(left) ++ extractPhysicalJoinCandidates(right) ++ Seq(
+          PhysicalJoinCandidate(
+            BroadcastHashJoinExec(leftKeys, rightKeys, joinType, buildSide, condition, left, right),
+            SortMergeJoinExec(leftKeys, rightKeys, joinType, condition, left, right)))
+      case uen: UnaryExecNode =>
+        extractPhysicalJoinCandidates(uen.child) ++ Seq.empty
+      case ben: BinaryExecNode =>
+        extractPhysicalJoinCandidates(ben.left) ++ extractPhysicalJoinCandidates(ben.right) ++ Nil
+      case len: LeafExecNode => Nil
+      case sp: SparkPlan => sp.children.flatMap(extractPhysicalJoinCandidates) ++ Nil
+      case _ => Nil
+    }
+  }
+
+  private def extractCombinations(
+    res: Seq[Seq[SparkPlan]],
+    physicalJoinCandidates: Seq[PhysicalJoinCandidate],
+    maxDepth: Int,
+    depth: Int): Seq[Seq[SparkPlan]] = {
+    if (maxDepth == depth + 1 || physicalJoinCandidates.size == 1) {
+      physicalJoinCandidates.head cross res
+    } else {
+      physicalJoinCandidates.head cross extractCombinations(
+        res, physicalJoinCandidates.drop(1), maxDepth, depth + 1)
+    }
+  }
+
+  def apply(sparkPlan: SparkPlan, sqlConf: SQLConf): Seq[SparkPlan] = {
+    val startTime = System.nanoTime()
+
+    val physicalJoinCandidates = extractPhysicalJoinCandidates(sparkPlan)
+    if (physicalJoinCandidates.isEmpty) {
+      return Seq(sparkPlan)
+    }
+
+    val maxDepthToCheck = {
+      if (physicalJoinCandidates.size > sqlConf.physicalCboOptimizerMaxDepth) {
+        sqlConf.physicalCboOptimizerMaxDepth
+      } else {
+        physicalJoinCandidates.size
+      }
+    }
+    val combinations: Seq[Seq[SparkPlan]] = extractCombinations(
+      Seq.empty[Seq[SparkPlan]], physicalJoinCandidates, maxDepthToCheck, 0)
+    val newPlans = Seq.fill[SparkPlan](combinations.size)(sparkPlan)
+
+    val plans = newPlans.zipWithIndex.map {
+      case (newPlan: SparkPlan, index: Int) =>
+        var depth = 0
+        val combination = combinations(index)
+        val joins = mutable.HashMap[(StructType, Option[Expression]), SparkPlan]()
+        newPlan transformUp {
+          case plj @ PlanLaterJoin(leftKeys, rightKeys, joinType, buildSide, condition, left, right,
+          leftRowCount, rightRowCount, rowCount) if depth < maxDepthToCheck =>
+            val currentDepth = depth
+            depth += 1
+            joins.put((plj.schema, condition), combination(currentDepth))
+            combination(currentDepth) match {
+              case bhj: BroadcastHashJoinExec => BroadcastHashJoinExec(
+                leftKeys, rightKeys, joinType, buildSide, condition, left, right, rowCount)
+              case smj: SortMergeJoinExec =>
+                SortMergeJoinExec(leftKeys, rightKeys, joinType, condition, left, right,
+                  leftRowCount, rightRowCount, rowCount)
+              case _ =>
+                logWarning("Unknown join algorithm")
+                BroadcastHashJoinExec(
+                  leftKeys, rightKeys, joinType, buildSide, condition, left, right, rowCount)
+            }
+          case plj @ PlanLaterJoin(
+          leftKeys, rightKeys, joinType, buildSide, condition, left, right, leftRowCount,
+          rightRowCount, rowCount) =>
+            val sameJoin = joins.get((plj.schema, condition))
+            if (sameJoin.isDefined) {
+              sameJoin match {
+                case Some(BroadcastHashJoinExec(_, _, _, _, _, _, _, _, _, _)) =>
+                  BroadcastHashJoinExec(leftKeys, rightKeys, joinType, buildSide, condition, left,
+                    right, leftRowCount, rightRowCount)
+                case Some(SortMergeJoinExec(_, _, _, _, _, _, _, _, _)) =>
+                  SortMergeJoinExec(leftKeys, rightKeys, joinType, condition, left, right,
+                    leftRowCount, rightRowCount)
+              }
+            } else {
+              BroadcastHashJoinExec(leftKeys, rightKeys, joinType, buildSide, condition, left,
+                right, leftRowCount, rightRowCount)
+            }
+        }
+    }
+    val durationInMs = (System.nanoTime() - startTime) / (1000 * 1000)
+    logInfo(s"New query planner finished. Duration: $durationInMs ms, number of plans: " +
+      s"${plans.length}, number of total candidates ${physicalJoinCandidates.size}")
+    if (plans.nonEmpty) plans else Seq(sparkPlan)
   }
 }

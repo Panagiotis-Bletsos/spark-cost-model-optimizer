@@ -20,12 +20,13 @@ package org.apache.spark.sql.execution.joins
 import org.apache.spark.TaskContext
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode, GenerateUnsafeProjection}
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.physical.{BroadcastDistribution, Distribution, Partitioning, UnspecifiedDistribution}
-import org.apache.spark.sql.execution.{BinaryExecNode, CodegenSupport, SparkPlan}
+import org.apache.spark.sql.execution.{BinaryExecNode, CodegenSupport, PhysicalCost, SparkPlan}
 import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.types.LongType
 
@@ -42,7 +43,10 @@ case class BroadcastHashJoinExec(
     buildSide: BuildSide,
     condition: Option[Expression],
     left: SparkPlan,
-    right: SparkPlan)
+    right: SparkPlan,
+    leftRowCount: Option[BigInt] = None,
+    rightRowCount: Option[BigInt] = None,
+    override val rowCount: Option[BigInt] = None)
   extends BinaryExecNode with HashJoin with CodegenSupport {
 
   override lazy val metrics = Map(
@@ -87,6 +91,21 @@ case class BroadcastHashJoinExec(
       case x =>
         throw new IllegalArgumentException(
           s"BroadcastHashJoin should not take $x as the JoinType")
+    }
+  }
+
+  override lazy val cost: PhysicalCost = {
+    if (rowCount.isDefined) {
+      val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
+      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
+      lazy val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
+      val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
+      val processingRowsInParallel = leftRowCount.get * rightRowCount.get / parallelization
+      val sqlContext = SparkSession.getActiveSession.map(_.sqlContext).get
+      val sqlConf = sqlContext.conf
+      new PhysicalCost(processingRowsInParallel.toDouble, 1, 1, 1)
+    } else {
+      new PhysicalCost(1, 1, 1, 1)
     }
   }
 

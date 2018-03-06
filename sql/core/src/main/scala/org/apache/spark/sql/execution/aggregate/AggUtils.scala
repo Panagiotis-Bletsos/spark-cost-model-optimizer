@@ -34,7 +34,8 @@ object AggUtils {
       aggregateAttributes: Seq[Attribute] = Nil,
       initialInputBufferOffset: Int = 0,
       resultExpressions: Seq[NamedExpression] = Nil,
-      child: SparkPlan): SparkPlan = {
+      child: SparkPlan,
+      rowCount: Option[BigInt] = None): SparkPlan = {
     val useHash = HashAggregateExec.supportsAggregate(
       aggregateExpressions.flatMap(_.aggregateFunction.aggBufferAttributes))
     if (useHash) {
@@ -45,7 +46,8 @@ object AggUtils {
         aggregateAttributes = aggregateAttributes,
         initialInputBufferOffset = initialInputBufferOffset,
         resultExpressions = resultExpressions,
-        child = child)
+        child = child,
+        rowCount = rowCount)
     } else {
       val objectHashEnabled = child.sqlContext.conf.useObjectHashAggregation
       val useObjectHash = ObjectHashAggregateExec.supportsAggregate(aggregateExpressions)
@@ -58,7 +60,8 @@ object AggUtils {
           aggregateAttributes = aggregateAttributes,
           initialInputBufferOffset = initialInputBufferOffset,
           resultExpressions = resultExpressions,
-          child = child)
+          child = child,
+          rowCount = rowCount)
       } else {
         SortAggregateExec(
           requiredChildDistributionExpressions = requiredChildDistributionExpressions,
@@ -67,7 +70,8 @@ object AggUtils {
           aggregateAttributes = aggregateAttributes,
           initialInputBufferOffset = initialInputBufferOffset,
           resultExpressions = resultExpressions,
-          child = child)
+          child = child,
+          rowCount = rowCount)
       }
     }
   }
@@ -76,7 +80,8 @@ object AggUtils {
       groupingExpressions: Seq[NamedExpression],
       aggregateExpressions: Seq[AggregateExpression],
       resultExpressions: Seq[NamedExpression],
-      child: SparkPlan): Seq[SparkPlan] = {
+      child: SparkPlan,
+      rowCount: Option[BigInt] = None): Seq[SparkPlan] = {
     // Check if we can use HashAggregate.
 
     // 1. Create an Aggregate Operator for partial aggregations.
@@ -96,7 +101,8 @@ object AggUtils {
         aggregateAttributes = partialAggregateAttributes,
         initialInputBufferOffset = 0,
         resultExpressions = partialResultExpressions,
-        child = child)
+        child = child,
+        rowCount = rowCount)
 
     // 2. Create an Aggregate Operator for final aggregations.
     val finalAggregateExpressions = aggregateExpressions.map(_.copy(mode = Final))
@@ -111,7 +117,8 @@ object AggUtils {
         aggregateAttributes = finalAggregateAttributes,
         initialInputBufferOffset = groupingExpressions.length,
         resultExpressions = resultExpressions,
-        child = partialAggregate)
+        child = partialAggregate,
+        rowCount = rowCount)
 
     finalAggregate :: Nil
   }
@@ -121,7 +128,8 @@ object AggUtils {
       functionsWithDistinct: Seq[AggregateExpression],
       functionsWithoutDistinct: Seq[AggregateExpression],
       resultExpressions: Seq[NamedExpression],
-      child: SparkPlan): Seq[SparkPlan] = {
+      child: SparkPlan,
+      rowCount: Option[BigInt] = None): Seq[SparkPlan] = {
 
     // functionsWithDistinct is guaranteed to be non-empty. Even though it may contain more than one
     // DISTINCT aggregate function, all of those functions will have the same column expressions.
@@ -149,7 +157,8 @@ object AggUtils {
         aggregateAttributes = aggregateAttributes,
         resultExpressions = groupingAttributes ++ distinctAttributes ++
           aggregateExpressions.flatMap(_.aggregateFunction.inputAggBufferAttributes),
-        child = child)
+        child = child,
+        rowCount = rowCount)
     }
 
     // 2. Create an Aggregate Operator for partial merge aggregations.
@@ -165,7 +174,8 @@ object AggUtils {
         initialInputBufferOffset = (groupingAttributes ++ distinctAttributes).length,
         resultExpressions = groupingAttributes ++ distinctAttributes ++
           aggregateExpressions.flatMap(_.aggregateFunction.inputAggBufferAttributes),
-        child = partialAggregate)
+        child = partialAggregate,
+        rowCount = rowCount)
     }
 
     // 3. Create an Aggregate operator for partial aggregation (for distinct)
@@ -206,7 +216,8 @@ object AggUtils {
         aggregateAttributes = mergeAggregateAttributes ++ distinctAggregateAttributes,
         initialInputBufferOffset = (groupingAttributes ++ distinctAttributes).length,
         resultExpressions = partialAggregateResult,
-        child = partialMergeAggregate)
+        child = partialMergeAggregate,
+        rowCount = rowCount)
     }
 
     // 4. Create an Aggregate Operator for the final aggregation.
@@ -236,7 +247,8 @@ object AggUtils {
         aggregateAttributes = finalAggregateAttributes ++ distinctAggregateAttributes,
         initialInputBufferOffset = groupingAttributes.length,
         resultExpressions = resultExpressions,
-        child = partialDistinctAggregate)
+        child = partialDistinctAggregate,
+        rowCount = rowCount)
     }
 
     finalAndCompleteAggregate :: Nil

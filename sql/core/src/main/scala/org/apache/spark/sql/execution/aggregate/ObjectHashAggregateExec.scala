@@ -64,7 +64,8 @@ case class ObjectHashAggregateExec(
     aggregateAttributes: Seq[Attribute],
     initialInputBufferOffset: Int,
     resultExpressions: Seq[NamedExpression],
-    child: SparkPlan)
+    child: SparkPlan,
+    override val rowCount: Option[BigInt] = None)
   extends UnaryExecNode {
 
   private[this] val aggregateBufferAttributes = {

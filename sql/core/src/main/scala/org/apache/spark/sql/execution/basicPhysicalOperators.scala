@@ -33,7 +33,10 @@ import org.apache.spark.util.ThreadUtils
 import org.apache.spark.util.random.{BernoulliCellSampler, PoissonSampler}
 
 /** Physical plan for Project. */
-case class ProjectExec(projectList: Seq[NamedExpression], child: SparkPlan)
+case class ProjectExec(
+  projectList: Seq[NamedExpression],
+  child: SparkPlan,
+  override val rowCount: Option[BigInt] = None)
   extends UnaryExecNode with CodegenSupport {
 
   override def output: Seq[Attribute] = projectList.map(_.toAttribute)
@@ -547,7 +550,8 @@ case class RangeExec(range: org.apache.spark.sql.catalyst.plans.logical.Range)
 /**
  * Physical plan for unioning two plans, without a distinct. This is UNION ALL in SQL.
  */
-case class UnionExec(children: Seq[SparkPlan]) extends SparkPlan {
+case class UnionExec(
+  children: Seq[SparkPlan], override val rowCount: Option[BigInt] = None) extends SparkPlan {
   override def output: Seq[Attribute] =
     children.map(_.output).transpose.map(attrs =>
       attrs.head.withNullability(attrs.exists(_.nullable)))

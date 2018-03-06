@@ -336,7 +336,7 @@ private[joins] object UnsafeHashedRelation {
  *  is determined by `key1 % cap`. Quadratic probing with triangular numbers is used to address
  *  hash collision.
  *
- * 2) dense mode: all the addresses are packed into a single array of long, as:
+ * 2) dense mode: all the addresses are packed into a single array of long, as:BytesToBytesMap
  *
  *  [address1] [address2] ...
  *

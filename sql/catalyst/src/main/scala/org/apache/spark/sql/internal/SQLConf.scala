@@ -64,6 +64,52 @@ object SQLConf {
     }
   }
 
+  val PHYSICAL_COST_BASED_OPTIMIZER = buildConf("spark.sql.physicalCbo")
+    .doc("When true multiple plans will be checked with different join algorithms")
+    .booleanConf
+    .createWithDefault(false)
+
+  val PHYSICAL_COST_BASED_OPTIMIZER_MAX_DEPTH = buildConf("spark.sql.physicalCbo.maxDepth")
+    .internal()
+    .doc("The max number of joins the optimizer will check")
+    .intConf
+    .createWithDefault(13)
+
+  val PHYSICAL_COST_CPU_WEIGHT =
+    buildConf("spark.sql.physicalCbo.cpu.weight")
+      .internal()
+      .doc("The weight of CPU for physical plan cost")
+      .doubleConf
+      .createWithDefault(1)
+
+  val PHYSICAL_COST_IO_WRITE_WEIGHT =
+    buildConf("spark.sql.physicalCbo.io.write.weight")
+      .internal()
+      .doc("The weight of writing to disk for physical plan cost")
+      .doubleConf
+      .createWithDefault(1.19)
+
+  val PHYSICAL_COST_IO_READ_WEIGHT =
+    buildConf("spark.sql.physicalCbo.io.read.weight")
+      .internal()
+      .doc("The weight of reading from disk for physical plan cost")
+      .doubleConf
+      .createWithDefault(1.19)
+
+  val PHYSICAL_COST_NET_WEIGHT =
+    buildConf("spark.sql.physicalCbo.net.weight")
+      .internal()
+      .doc("The weight of Network for physical plan cost")
+      .doubleConf
+      .createWithDefault(1.2)
+
+  val PHYSICAL_COST_HASHING_WEIGHT =
+    buildConf("spark.sql.physicalCbo.hashing.weight")
+      .internal()
+      .doc("The weight of hashing a table.")
+      .doubleConf
+      .createWithDefault(20)
+
   val OPTIMIZER_MAX_ITERATIONS = buildConf("spark.sql.optimizer.maxIterations")
     .internal()
     .doc("The max number of iterations the optimizer and analyzer runs.")
@@ -823,6 +869,20 @@ class SQLConf extends Serializable with Logging {
   @transient private val reader = new ConfigReader(settings)
 
   /** ************************ Spark SQL Params/Hints ******************* */
+
+  def physicalCboOptimizerEnabled: Boolean = getConf(PHYSICAL_COST_BASED_OPTIMIZER)
+
+  def physicalCboOptimizerMaxDepth: Int = getConf(PHYSICAL_COST_BASED_OPTIMIZER_MAX_DEPTH)
+
+  def physicalCboCPUWeight: Double = getConf(SQLConf.PHYSICAL_COST_CPU_WEIGHT)
+
+  def physicalCboIOWriteWeight: Double = getConf(SQLConf.PHYSICAL_COST_IO_WRITE_WEIGHT)
+
+  def physicalCboIOReadWeight: Double = getConf(SQLConf.PHYSICAL_COST_IO_READ_WEIGHT)
+
+  def physicalCboNetWeight: Double = getConf(SQLConf.PHYSICAL_COST_NET_WEIGHT)
+
+  def physicalCboHashingWeight: Double = getConf(SQLConf.PHYSICAL_COST_HASHING_WEIGHT)
 
   def optimizerMaxIterations: Int = getConf(OPTIMIZER_MAX_ITERATIONS)
 

@@ -17,8 +17,11 @@
 
 package org.apache.spark
 
+import java.util
 import java.util.concurrent.{Executors, TimeUnit}
 
+import scala.collection.mutable
+import scala.collection.mutable.{HashSet, Set}
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -29,7 +32,7 @@ import com.esotericsoftware.kryo.Kryo
 import org.apache.spark.internal.config._
 import org.apache.spark.network.util.ByteUnit
 import org.apache.spark.serializer.{JavaSerializer, KryoRegistrator, KryoSerializer}
-import org.apache.spark.util.{ResetSystemProperties, RpcUtils}
+import org.apache.spark.util.{AccumulatorV2, ResetSystemProperties, RpcUtils}
 
 class SparkConfSuite extends SparkFunSuite with LocalSparkContext with ResetSystemProperties {
   test("Test byteString conversion") {
@@ -196,6 +199,35 @@ class SparkConfSuite extends SparkFunSuite with LocalSparkContext with ResetSyst
     serializer.newInstance().serialize(new Class3())
   }
 
+  test("register custom accumulator through registerKryoClasses") {
+    val conf = new SparkConf()
+      .set("spark.kryo.registrationRequired", "true")
+      .setAppName("test2")
+      .setMaster("local")
+
+    conf.registerKryoClasses(Array(classOf[CustomAccumulator], classOf[Class1]))
+    assert(conf.get("spark.kryo.classesToRegister") ===
+      classOf[CustomAccumulator].getName + "," + classOf[Class1].getName)
+
+    val customAccumulator = new CustomAccumulator
+
+    val spark = new SparkContext(conf)
+    spark.register(customAccumulator)
+
+    val serializer = new KryoSerializer(conf).newInstance()
+    serializer.serialize(new CustomAccumulator)
+    serializer.serialize(new Class1)
+
+    val class11 = new Class1
+    val class12 = new Class1
+
+    serializer.deserialize[CustomAccumulator](serializer.serialize(customAccumulator))
+
+    customAccumulator.add(class11)
+    customAccumulator.add(class12)
+    val v = customAccumulator.value
+  }
+
   test("register kryo classes through registerKryoClasses and custom registrator") {
     val conf = new SparkConf().set("spark.kryo.registrationRequired", "true")
 
@@ -324,7 +356,7 @@ class SparkConfSuite extends SparkFunSuite with LocalSparkContext with ResetSyst
 
 }
 
-class Class1 {}
+class Class1 extends Serializable {}
 class Class2 {}
 class Class3 {}
 
@@ -332,4 +364,21 @@ class CustomRegistrator extends KryoRegistrator {
   def registerClasses(kryo: Kryo) {
     kryo.register(classOf[Class2])
   }
+}
+
+class CustomAccumulator extends AccumulatorV2[Class1, Class1] {
+  //private def invalidSet: java.util.Set[Class1] = java.util.ArrayList[Class1]
+  private def x: Int = 0
+
+  override def isZero: Boolean = true
+
+  override def copy(): AccumulatorV2[Class1, Class1] = this
+
+  override def reset(): Unit = x
+
+  override def add(v: Class1): Unit = x
+
+  override def merge(other: AccumulatorV2[Class1, Class1]): Unit = 0
+
+  override def value: Class1 = new Class1
 }

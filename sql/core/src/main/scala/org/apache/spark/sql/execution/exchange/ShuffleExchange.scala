@@ -38,7 +38,8 @@ import org.apache.spark.util.MutablePair
 case class ShuffleExchange(
     var newPartitioning: Partitioning,
     child: SparkPlan,
-    @transient coordinator: Option[ExchangeCoordinator]) extends Exchange {
+    @transient coordinator: Option[ExchangeCoordinator],
+    override val rowCount: Option[BigInt] = None) extends Exchange {
 
   // NOTE: coordinator can be null after serialization/deserialization,
   //       e.g. it can be null on the Executor side
@@ -74,6 +75,24 @@ case class ShuffleExchange(
     coordinator match {
       case Some(exchangeCoordinator) => exchangeCoordinator.registerExchange(this)
       case _ =>
+    }
+  }
+
+  override lazy val cost: PhysicalCost = {
+    if (rowCount.isDefined) {
+      val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
+      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
+      val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
+      val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
+      val processingRowsInParallel = (rowCount.get / parallelization).toDouble
+      val rowSize = UnsafeRow.calculateFixedPortionByteSize(this.schema.fields.length)
+      new PhysicalCost(
+        processingRowsInParallel,
+        processingRowsInParallel * rowSize,
+        processingRowsInParallel * rowSize,
+        processingRowsInParallel * rowSize)
+    } else {
+      new PhysicalCost(1, 1, 1, 1)
     }
   }
 
@@ -130,8 +149,10 @@ case class ShuffleExchange(
 }
 
 object ShuffleExchange {
-  def apply(newPartitioning: Partitioning, child: SparkPlan): ShuffleExchange = {
-    ShuffleExchange(newPartitioning, child, coordinator = Option.empty[ExchangeCoordinator])
+  def apply(
+    newPartitioning: Partitioning, child: SparkPlan, rowCount: Option[BigInt]): ShuffleExchange = {
+    ShuffleExchange(
+      newPartitioning, child, coordinator = Option.empty[ExchangeCoordinator], rowCount = rowCount)
   }
 
   /**

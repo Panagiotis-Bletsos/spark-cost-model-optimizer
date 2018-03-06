@@ -107,6 +107,10 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   /** Specifies sort order for each partition requirements on the input data for this operator. */
   def requiredChildOrdering: Seq[Seq[SortOrder]] = Seq.fill(children.size)(Nil)
 
+  def rowCount: Option[BigInt] = None
+
+  lazy val cost: PhysicalCost = new PhysicalCost(1, 1, 1, 1)
+
   /**
    * Returns the result of this query as an RDD[InternalRow] by delegating to `doExecute` after
    * preparations.
@@ -405,6 +409,13 @@ trait LeafExecNode extends SparkPlan {
   override def producedAttributes: AttributeSet = outputSet
 }
 
+object LeafExecNode {
+  def unapply(arg: LeafExecNode): Option[SparkPlan] = arg match {
+    case s: SparkPlan if s.children.isEmpty => Some(s)
+    case _ => None
+  }
+}
+
 object UnaryExecNode {
   def unapply(a: Any): Option[(SparkPlan, SparkPlan)] = a match {
     case s: SparkPlan if s.children.size == 1 => Some((s, s.children.head))
@@ -423,4 +434,10 @@ trait BinaryExecNode extends SparkPlan {
   def right: SparkPlan
 
   override final def children: Seq[SparkPlan] = Seq(left, right)
+}
+
+object BinaryExecNode {
+  def unapply(arg: BinaryExecNode): Option[(SparkPlan, Seq[SparkPlan])] = arg match {
+    case s: SparkPlan if s.children.size > 1 => Some(s, s.children)
+  }
 }

@@ -31,7 +31,7 @@ class ExchangeSuite extends SparkPlanTest with SharedSQLContext {
     val input = (1 to 1000).map(Tuple1.apply)
     checkAnswer(
       input.toDF(),
-      plan => ShuffleExchange(SinglePartition, plan),
+      plan => ShuffleExchange(SinglePartition, plan, None),
       input.map(Row.fromTuple)
     )
   }
@@ -81,12 +81,12 @@ class ExchangeSuite extends SparkPlanTest with SharedSQLContext {
     assert(plan sameResult plan)
 
     val part1 = HashPartitioning(output, 1)
-    val exchange1 = ShuffleExchange(part1, plan)
-    val exchange2 = ShuffleExchange(part1, plan)
+    val exchange1 = ShuffleExchange(part1, plan, None)
+    val exchange2 = ShuffleExchange(part1, plan, None)
     val part2 = HashPartitioning(output, 2)
-    val exchange3 = ShuffleExchange(part2, plan)
+    val exchange3 = ShuffleExchange(part2, plan, None)
     val part3 = HashPartitioning(output ++ output, 2)
-    val exchange4 = ShuffleExchange(part3, plan)
+    val exchange4 = ShuffleExchange(part3, plan, None)
     val exchange5 = ReusedExchangeExec(output, exchange4)
 
     assert(exchange1 sameResult exchange1)

@@ -92,7 +92,10 @@ trait BaseLimitExec extends UnaryExecNode with CodegenSupport {
 /**
  * Take the first `limit` elements of each child partition, but do not collect or shuffle them.
  */
-case class LocalLimitExec(limit: Int, child: SparkPlan) extends BaseLimitExec {
+case class LocalLimitExec(
+  limit: Int,
+  child: SparkPlan,
+  override val rowCount: Option[BigInt] = None) extends BaseLimitExec {
 
   override def outputOrdering: Seq[SortOrder] = child.outputOrdering
 
@@ -102,7 +105,10 @@ case class LocalLimitExec(limit: Int, child: SparkPlan) extends BaseLimitExec {
 /**
  * Take the first `limit` elements of the child's single output partition.
  */
-case class GlobalLimitExec(limit: Int, child: SparkPlan) extends BaseLimitExec {
+case class GlobalLimitExec(
+  limit: Int,
+  child: SparkPlan,
+  override val rowCount: Option[BigInt] = None) extends BaseLimitExec {
 
   override def requiredChildDistribution: List[Distribution] = AllTuples :: Nil
 
