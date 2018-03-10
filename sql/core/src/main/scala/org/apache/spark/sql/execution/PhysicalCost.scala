@@ -21,18 +21,19 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.internal.SQLConf
 
 class PhysicalCost(
-  cpuCost: Double, ioReadCost: Double, ioWriteCost: Double, netCost: Double) extends Serializable {
-  lazy val get: Double = {
-    assert(cpuCost > 0 && ioReadCost > 0 && ioWriteCost > 0 && netCost > 0)
-
+  cpuCost: BigDecimal,
+  ioReadCost: BigDecimal,
+  ioWriteCost: BigDecimal,
+  netCost: BigDecimal) extends Serializable {
+  lazy val get: BigDecimal = {
     val sqlContext = SparkSession.getActiveSession.map(_.sqlContext).orNull
     assert(sqlContext != null)
     val sqlConf = sqlContext.conf
 
-    val cpuWeightedCost = sqlConf.physicalCboCPUWeight * Math.log(cpuCost)
-    val ioReadWeightedCost = sqlConf.physicalCboIOReadWeight * Math.log(ioReadCost)
-    val ioWriteWeightedCost = sqlConf.physicalCboIOWriteWeight * Math.log(ioWriteCost)
-    val netWeightedCost = sqlConf.physicalCboNetWeight * Math.log(netCost)
+    val cpuWeightedCost = sqlConf.physicalCboCPUWeight * cpuCost
+    val ioReadWeightedCost = sqlConf.physicalCboIOReadWeight * ioReadCost
+    val ioWriteWeightedCost = sqlConf.physicalCboIOWriteWeight * ioWriteCost
+    val netWeightedCost = sqlConf.physicalCboNetWeight * netCost
     cpuWeightedCost + ioReadWeightedCost + ioWriteWeightedCost + netWeightedCost
   }
 }

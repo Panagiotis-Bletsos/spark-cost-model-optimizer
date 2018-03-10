@@ -61,6 +61,8 @@ case class SortExec(
     "peakMemory" -> SQLMetrics.createSizeMetric(sparkContext, "peak memory"),
     "spillSize" -> SQLMetrics.createSizeMetric(sparkContext, "spill size"))
 
+  override protected def preCanonicalized: SortExec = copy(rowCount = None)
+
   override lazy val cost: PhysicalCost = {
     if (rowCount.isDefined) {
       val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
@@ -68,9 +70,10 @@ case class SortExec(
       val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
       val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
       val processingRowsInParallel = (rowCount.get / parallelization).toDouble
-      new PhysicalCost(processingRowsInParallel * math.log(processingRowsInParallel), 1, 1, 1)
+      new PhysicalCost(BigDecimal(processingRowsInParallel) * BigDecimal(
+          math.max(math.log(processingRowsInParallel), 1)), 0, 0, 0)
     } else {
-      new PhysicalCost(1, 1, 1, 1)
+      new PhysicalCost(0, 0, 0, 0)
     }
   }
 

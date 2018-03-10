@@ -84,7 +84,7 @@ case class ShuffleExchange(
       val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
       val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
       val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
-      val processingRowsInParallel = (rowCount.get / parallelization).toDouble
+      val processingRowsInParallel = BigDecimal(rowCount.get / parallelization)
       val rowSize = UnsafeRow.calculateFixedPortionByteSize(this.schema.fields.length)
       new PhysicalCost(
         processingRowsInParallel,
@@ -92,9 +92,11 @@ case class ShuffleExchange(
         processingRowsInParallel * rowSize,
         processingRowsInParallel * rowSize)
     } else {
-      new PhysicalCost(1, 1, 1, 1)
+      new PhysicalCost(0, 0, 0, 0)
     }
   }
+
+  override lazy val preCanonicalized: ShuffleExchange = copy(rowCount = None)
 
   /**
    * Returns a [[ShuffleDependency]] that will partition rows of its child based on

@@ -109,13 +109,16 @@ case class SortMergeJoinExec(
       val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
       val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
       val parallelization = math.max(numOfExecutors * ( coresPerExecutor / tasksPerCpu), 1)
-      val processingRowsInParallel =
-        (leftRowCount.get * rightRowCount.get / parallelization).toDouble
-      new PhysicalCost(processingRowsInParallel, 1, 1, 1)
+      val processingRowsInParallel = BigDecimal(
+        leftRowCount.getOrElse(BigInt(1)) * rightRowCount.getOrElse(BigInt(1)) / parallelization)
+      new PhysicalCost(processingRowsInParallel, 0, 0, 0)
     } else {
-      new PhysicalCost(1, 1, 1, 1)
+      new PhysicalCost(0, 0, 0, 0)
     }
   }
+
+  override lazy val preCanonicalized: SortMergeJoinExec =
+    copy(leftRowCount = None, rightRowCount = None, rowCount = None)
 
   /**
    * For SMJ, child's output must have been sorted on key or expressions with the same order as

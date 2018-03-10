@@ -100,14 +100,16 @@ case class BroadcastHashJoinExec(
       val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
       lazy val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
       val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
-      val processingRowsInParallel = leftRowCount.get * rightRowCount.get / parallelization
-      val sqlContext = SparkSession.getActiveSession.map(_.sqlContext).get
-      val sqlConf = sqlContext.conf
-      new PhysicalCost(processingRowsInParallel.toDouble, 1, 1, 1)
+      val processingRowsInParallel = BigDecimal(
+        leftRowCount.getOrElse(BigInt(1)) * rightRowCount.getOrElse(BigInt(1)) / parallelization)
+      new PhysicalCost(processingRowsInParallel, 0, 0, 0)
     } else {
-      new PhysicalCost(1, 1, 1, 1)
+      new PhysicalCost(0, 0, 0, 0)
     }
   }
+
+  override lazy val preCanonicalized: BroadcastHashJoinExec =
+    copy(leftRowCount = None, rightRowCount = None, rowCount = None)
 
   /**
    * Returns a tuple of Broadcast of HashedRelation and the variable name for it.

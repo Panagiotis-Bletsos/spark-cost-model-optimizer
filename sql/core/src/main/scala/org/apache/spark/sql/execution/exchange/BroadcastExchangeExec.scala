@@ -59,12 +59,12 @@ case class BroadcastExchangeExec(
       val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
       val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
       val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
-      val processingRowsInParallel = (rowCount.get / parallelization).toDouble
+      val processingRowsInParallel = BigDecimal(rowCount.get / parallelization)
       val cpuCost = processingRowsInParallel * sqlContext.conf.physicalCboHashingWeight
       val rowSize = UnsafeRow.calculateFixedPortionByteSize(this.schema.fields.length)
-      new PhysicalCost(cpuCost, 1, 1, processingRowsInParallel * rowSize)
+      new PhysicalCost(cpuCost, 0, 0, processingRowsInParallel * rowSize)
     } else {
-      new PhysicalCost(1, 1, 1, 1)
+      new PhysicalCost(0, 0, 0, 0)
     }
   }
 

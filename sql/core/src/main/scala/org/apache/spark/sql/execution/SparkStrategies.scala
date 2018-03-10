@@ -157,7 +157,10 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         if conf.physicalCboOptimizerEnabled &&
           canBuildRight(joinType) &&
           canBroadcast(right) &&
-          RowOrdering.isOrderable(leftKeys) =>
+          RowOrdering.isOrderable(leftKeys) &&
+          left.stats(conf).rowCount.isDefined &&
+          right.stats(conf).rowCount.isDefined &&
+          plan.stats(conf).rowCount.isDefined =>
         Seq(PlanLaterJoin(
           leftKeys, rightKeys, joinType, BuildRight, condition, planLater(left), planLater(right),
           left.stats(conf).rowCount, right.stats(conf).rowCount, plan.stats(conf).rowCount))
@@ -166,7 +169,10 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         if conf.physicalCboOptimizerEnabled &&
           canBuildLeft(joinType) &&
           canBroadcast(left) &&
-          RowOrdering.isOrderable(leftKeys) =>
+          RowOrdering.isOrderable(leftKeys) &&
+          left.stats(conf).rowCount.isDefined &&
+          right.stats(conf).rowCount.isDefined &&
+          plan.stats(conf).rowCount.isDefined =>
         Seq(PlanLaterJoin(
           leftKeys, rightKeys, joinType, BuildLeft, condition, planLater(left), planLater(right),
           left.stats(conf).rowCount, right.stats(conf).rowCount, plan.stats(conf).rowCount))
@@ -206,7 +212,8 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
       case ExtractEquiJoinKeys(joinType, leftKeys, rightKeys, condition, left, right)
         if RowOrdering.isOrderable(leftKeys) =>
         joins.SortMergeJoinExec(
-          leftKeys, rightKeys, joinType, condition, planLater(left), planLater(right)) :: Nil
+          leftKeys, rightKeys, joinType, condition, planLater(left), planLater(right),
+          left.stats(conf).rowCount, right.stats(conf).rowCount, plan.stats(conf).rowCount) :: Nil
 
       // --- Without joining keys ------------------------------------------------------------
 

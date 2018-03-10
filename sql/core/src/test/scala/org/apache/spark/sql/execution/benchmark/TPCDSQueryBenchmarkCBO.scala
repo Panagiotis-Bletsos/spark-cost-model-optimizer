@@ -52,7 +52,6 @@ object TPCDSQueryBenchmarkCBO extends Logging {
     .enableHiveSupport()
     .getOrCreate()
 
-  spark.sparkContext.setLogLevel("ERROR")
 
   val tables = Seq("catalog_page", "catalog_returns", "customer", "customer_address",
     "customer_demographics", "date_dim", "household_demographics", "inventory", "item",
@@ -123,7 +122,7 @@ object TPCDSQueryBenchmarkCBO extends Logging {
         output = Option(benchmarkResultStream))
 
        // scalastyle:off println
-       explainCostPrintStream.println(
+      explainCostPrintStream.println(
         spark.sql(s"EXPLAIN COST $queryString").collect().map(_.mkString).mkString)
        // scalastyle:on println
 

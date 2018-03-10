@@ -93,10 +93,17 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) e
   lazy val optimalSparkPlan: SparkPlan = {
     val startTime = System.nanoTime()
     val plans = CostBasedQueryPlanner(sparkPlan, sparkSession.sessionState.conf)
+    assert(plans.nonEmpty, "There must be at least one Spark plan")
     val executedPlans = plans map prepareForExecution
-    val bestPlan = executedPlans.minBy(_.map(_.cost.get).sum)
+    val bestPlan = if (executedPlans.size == 1) {
+      executedPlans.head
+    } else {
+      executedPlans.minBy(_.map(_.cost.get).sum)
+    }
     val durationInMs = (System.nanoTime() - startTime) / (1000 * 1000)
-    logError(s"Optimal plan found. Duration: $durationInMs ms")
+    if (executedPlans.length > 1) {
+      logInfo(s"Optimal plan found. Duration: $durationInMs ms")
+    }
     bestPlan
   }
 
@@ -281,7 +288,7 @@ object CostBasedQueryPlanner extends Logging {
       if (other.nonEmpty) {
         val c: Seq[Seq[Any]] = for { x <- this.toSeq; y <- other } yield Seq(x, y)
         c.map(_.flatMap {
-          case s: Seq[SparkPlan] => s.flatMap(Seq(_))
+          case s: Seq[SparkPlan @unchecked] => s.flatMap(Seq(_))
           case sp: SparkPlan => Seq(sp)
         })
       } else {
@@ -323,6 +330,33 @@ object CostBasedQueryPlanner extends Logging {
     }
   }
 
+  private def prune(sparkPlans: Seq[SparkPlan]): Seq[SparkPlan] = {
+    def rowCountExists: SparkPlan => Boolean = {
+      case BroadcastHashJoinExec(
+        _, _, _, _, _, left, right, leftRowCount, rightRowCount, rowCount) =>
+        if (leftRowCount.isDefined && rightRowCount.isDefined && rowCount.isDefined) {
+          rowCountExists(left) && rowCountExists(right)
+        } else {
+          false
+        }
+      case SortMergeJoinExec(_, _, _, _, left, right, leftRowCount, rightRowCount, rowCount) =>
+        if (leftRowCount.isDefined && rightRowCount.isDefined && rowCount.isDefined) {
+          rowCountExists(left) && rowCountExists(right)
+        } else {
+          false
+        }
+      case SortExec(_, _, child, _, rowCount) =>
+        if (rowCount.isDefined) rowCountExists(child) else false
+      case uen: UnaryExecNode =>
+        rowCountExists(uen.child)
+      case ben: BinaryExecNode =>
+        rowCountExists(ben.left) && rowCountExists(ben.right)
+      case len: LeafExecNode => true
+      case sp: SparkPlan => sp.children.forall(rowCountExists)
+    }
+    sparkPlans filter rowCountExists
+  }
+
   def apply(sparkPlan: SparkPlan, sqlConf: SQLConf): Seq[SparkPlan] = {
     val startTime = System.nanoTime()
 
@@ -355,37 +389,45 @@ object CostBasedQueryPlanner extends Logging {
             joins.put((plj.schema, condition), combination(currentDepth))
             combination(currentDepth) match {
               case bhj: BroadcastHashJoinExec => BroadcastHashJoinExec(
-                leftKeys, rightKeys, joinType, buildSide, condition, left, right, rowCount)
+                leftKeys, rightKeys, joinType, buildSide, condition, left, right, leftRowCount,
+                rightRowCount, rowCount)
               case smj: SortMergeJoinExec =>
                 SortMergeJoinExec(leftKeys, rightKeys, joinType, condition, left, right,
                   leftRowCount, rightRowCount, rowCount)
               case _ =>
                 logWarning("Unknown join algorithm")
-                BroadcastHashJoinExec(
-                  leftKeys, rightKeys, joinType, buildSide, condition, left, right, rowCount)
+                BroadcastHashJoinExec(leftKeys, rightKeys, joinType, buildSide, condition, left,
+                  right, leftRowCount, rightRowCount, rowCount)
             }
           case plj @ PlanLaterJoin(
           leftKeys, rightKeys, joinType, buildSide, condition, left, right, leftRowCount,
           rightRowCount, rowCount) =>
             val sameJoin = joins.get((plj.schema, condition))
-            if (sameJoin.isDefined) {
-              sameJoin match {
-                case Some(BroadcastHashJoinExec(_, _, _, _, _, _, _, _, _, _)) =>
-                  BroadcastHashJoinExec(leftKeys, rightKeys, joinType, buildSide, condition, left,
-                    right, leftRowCount, rightRowCount)
-                case Some(SortMergeJoinExec(_, _, _, _, _, _, _, _, _)) =>
-                  SortMergeJoinExec(leftKeys, rightKeys, joinType, condition, left, right,
-                    leftRowCount, rightRowCount)
-              }
-            } else {
-              BroadcastHashJoinExec(leftKeys, rightKeys, joinType, buildSide, condition, left,
-                right, leftRowCount, rightRowCount)
+            sameJoin match {
+              case Some(BroadcastHashJoinExec(_, _, _, _, _, _, _, _, _, _)) =>
+                BroadcastHashJoinExec(leftKeys, rightKeys, joinType, buildSide, condition, left,
+                  right, leftRowCount, rightRowCount, rowCount)
+              case Some(SortMergeJoinExec(_, _, _, _, _, _, _, _, _)) =>
+                SortMergeJoinExec(leftKeys, rightKeys, joinType, condition, left, right,
+                  leftRowCount, rightRowCount, rowCount)
+              case _ => BroadcastHashJoinExec(leftKeys, rightKeys, joinType, buildSide, condition,
+                left, right, leftRowCount, rightRowCount, rowCount)
             }
         }
     }
+    val prunedPlans = prune(plans)
     val durationInMs = (System.nanoTime() - startTime) / (1000 * 1000)
-    logInfo(s"New query planner finished. Duration: $durationInMs ms, number of plans: " +
-      s"${plans.length}, number of total candidates ${physicalJoinCandidates.size}")
-    if (plans.nonEmpty) plans else Seq(sparkPlan)
+    logInfo(
+      s"""New query planner finished. Duration: $durationInMs ms, number of plans:
+         | ${plans.length}, number of pruned plans: ${prunedPlans.length}
+         | number of total candidates ${physicalJoinCandidates.size}""".stripMargin)
+     if (prunedPlans.nonEmpty) {
+      prunedPlans
+     } else if (plans.nonEmpty) { // maybe a plan doesn't have rowCount but platLater join exists
+      plans.head :: Nil
+     } else {
+      Seq(sparkPlan)
+     }
+    plans
   }
 }
