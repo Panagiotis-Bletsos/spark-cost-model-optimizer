@@ -17,23 +17,10 @@
 
 package org.apache.spark.sql.execution
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.Attribute
 
-class PhysicalCost(
-  cpuCost: BigDecimal,
-  ioReadCost: BigDecimal,
-  ioWriteCost: BigDecimal,
-  netCost: BigDecimal) extends Serializable {
-  lazy val get: BigDecimal = {
-    val sqlContext = SparkSession.getActiveSession.map(_.sqlContext).orNull
-    assert(sqlContext != null)
-    val sqlConf = sqlContext.conf
-
-    val cpuWeightedCost = sqlConf.physicalCboCPUWeight * cpuCost
-    val ioReadWeightedCost = sqlConf.physicalCboIOReadWeight * ioReadCost
-    val ioWriteWeightedCost = sqlConf.physicalCboIOWriteWeight * ioWriteCost
-    val netWeightedCost = sqlConf.physicalCboNetWeight * netCost
-    cpuWeightedCost + ioReadWeightedCost + ioWriteWeightedCost + netWeightedCost
-  }
+case class ReusedChild(override val output: Seq[Attribute]) extends LeafExecNode {
+  override def doExecute(): RDD[InternalRow] = throw new UnsupportedOperationException
 }

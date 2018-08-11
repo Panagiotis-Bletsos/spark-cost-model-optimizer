@@ -26,8 +26,9 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode, GenerateUnsafeProjection}
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.physical.{BroadcastDistribution, Distribution, Partitioning, UnspecifiedDistribution}
-import org.apache.spark.sql.execution.{BinaryExecNode, CodegenSupport, PhysicalCost, SparkPlan}
+import org.apache.spark.sql.execution.{BinaryExecNode, CodegenSupport, SparkPlan}
 import org.apache.spark.sql.execution.metric.SQLMetrics
+import org.apache.spark.sql.execution.physicalcosts.PhysicalCost
 import org.apache.spark.sql.types.LongType
 
 /**
@@ -91,20 +92,6 @@ case class BroadcastHashJoinExec(
       case x =>
         throw new IllegalArgumentException(
           s"BroadcastHashJoin should not take $x as the JoinType")
-    }
-  }
-
-  override lazy val cost: PhysicalCost = {
-    if (rowCount.isDefined) {
-      val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
-      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
-      lazy val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
-      val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
-      val processingRowsInParallel = BigDecimal(
-        leftRowCount.getOrElse(BigInt(1)) * rightRowCount.getOrElse(BigInt(1)) / parallelization)
-      new PhysicalCost(processingRowsInParallel, 0, 0, 0)
-    } else {
-      new PhysicalCost(0, 0, 0, 0)
     }
   }
 

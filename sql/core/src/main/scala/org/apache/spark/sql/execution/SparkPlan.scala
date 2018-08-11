@@ -109,8 +109,6 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
 
   def rowCount: Option[BigInt] = None
 
-  lazy val cost: PhysicalCost = new PhysicalCost(0, 0, 0, 0)
-
   /**
    * Returns the result of this query as an RDD[InternalRow] by delegating to `doExecute` after
    * preparations.

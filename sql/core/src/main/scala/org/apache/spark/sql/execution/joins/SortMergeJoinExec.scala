@@ -103,20 +103,6 @@ case class SortMergeJoinExec(
         s"${getClass.getSimpleName} should not take $x as the JoinType")
   }
 
-  override lazy val cost: PhysicalCost = {
-    if (rowCount.isDefined) {
-      val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
-      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
-      val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
-      val parallelization = math.max(numOfExecutors * ( coresPerExecutor / tasksPerCpu), 1)
-      val processingRowsInParallel = BigDecimal(
-        leftRowCount.getOrElse(BigInt(1)) * rightRowCount.getOrElse(BigInt(1)) / parallelization)
-      new PhysicalCost(processingRowsInParallel, 0, 0, 0)
-    } else {
-      new PhysicalCost(0, 0, 0, 0)
-    }
-  }
-
   override lazy val preCanonicalized: SortMergeJoinExec =
     copy(leftRowCount = None, rightRowCount = None, rowCount = None)
 

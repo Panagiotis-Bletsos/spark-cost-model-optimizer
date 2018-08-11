@@ -30,6 +30,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.LazilyGeneratedOrdering
 import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.metric.SQLMetrics
+import org.apache.spark.sql.execution.physicalcosts.PhysicalCost
 import org.apache.spark.util.MutablePair
 
 /**
@@ -75,24 +76,6 @@ case class ShuffleExchange(
     coordinator match {
       case Some(exchangeCoordinator) => exchangeCoordinator.registerExchange(this)
       case _ =>
-    }
-  }
-
-  override lazy val cost: PhysicalCost = {
-    if (rowCount.isDefined) {
-      val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
-      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
-      val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
-      val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
-      val processingRowsInParallel = BigDecimal(rowCount.get / parallelization)
-      val rowSize = UnsafeRow.calculateFixedPortionByteSize(this.schema.fields.length)
-      new PhysicalCost(
-        processingRowsInParallel,
-        processingRowsInParallel * rowSize,
-        processingRowsInParallel * rowSize,
-        processingRowsInParallel * rowSize)
-    } else {
-      new PhysicalCost(0, 0, 0, 0)
     }
   }
 

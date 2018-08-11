@@ -33,7 +33,8 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.execution.command.{DescribeTableCommand, ExecutedCommandExec, ShowTablesCommand}
 import org.apache.spark.sql.execution.exchange.{EnsureRequirements, ReuseExchange}
-import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, PlanLaterJoin, SortMergeJoinExec}
+import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, BuildLeft, PlanLaterJoin, SortMergeJoinExec}
+import org.apache.spark.sql.execution.physicalcosts.{BroadcastHashJoinPhysicalCost, SortMergeJoinPhysicalCost}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{BinaryType, DateType, DecimalType, TimestampType, _}
 import org.apache.spark.util.Utils
@@ -94,24 +95,113 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) e
     val startTime = System.nanoTime()
     val plans = CostBasedQueryPlanner(sparkPlan, sparkSession.sessionState.conf)
     assert(plans.nonEmpty, "There must be at least one Spark plan")
-    val executedPlans = plans map prepareForExecution
-    val bestPlan = if (executedPlans.size == 1) {
-      executedPlans.head
+    if (plans.size == 1) {
+      plans.head
     } else {
-      executedPlans.minBy(_.map(_.cost.get).sum)
+      val transformedPlans = plans map { planToTransform =>
+        val joins = mutable.HashMap[(StructType, Option[Expression]), SparkPlan]()
+        planToTransform transform {
+          case bhj @ BroadcastHashJoinExec(
+          leftKeys, rightKeys, joinType, buildSide, condition, left, right, leftRowCount,
+          rightRowCount, rowCount) =>
+            val sameJoin = joins.get((bhj.schema, condition))
+            sameJoin match {
+              case None =>
+                joins.put((bhj.schema, condition), bhj)
+                bhj
+              case _ =>
+                val newJoin = buildSide match {
+                  case BuildLeft =>
+                    val sameResult = sameJoin
+                      .get.asInstanceOf[BroadcastHashJoinExec].left.sameResult(bhj.left)
+                    if (sameResult) {
+                      BroadcastHashJoinExec(leftKeys, rightKeys, joinType, buildSide, condition,
+                        ReusedChild(left.output), right, leftRowCount, rightRowCount, rowCount)
+                    } else {
+                      bhj
+                    }
+                  case _ =>
+                    val sameResult = sameJoin
+                      .get.asInstanceOf[BroadcastHashJoinExec].right.sameResult(bhj.right)
+                    if (sameResult) {
+                      BroadcastHashJoinExec(leftKeys, rightKeys, joinType, buildSide, condition,
+                        left, ReusedChild(right.output), leftRowCount, rightRowCount, rowCount)
+                    } else {
+                      bhj
+                    }
+                }
+                newJoin
+            }
+          case smj @ SortMergeJoinExec(leftKeys, rightKeys, joinType, condition, left, right,
+          leftRowCount, rightRowCount, rowCount) =>
+            val sameJoin = joins.get((smj.schema, condition))
+            sameJoin match {
+              case None =>
+                joins.put((smj.schema, condition), smj)
+                smj
+              case _ =>
+                val leftSameResult =
+                  sameJoin.get.asInstanceOf[SortMergeJoinExec].left.sameResult(smj.left)
+                // lc = left child
+                val lc = if (leftSameResult) {
+                  SortMergeJoinExec(leftKeys, rightKeys, joinType, condition,
+                    ReusedChild(left.output), right, leftRowCount, rightRowCount, rowCount)
+                } else {
+                  smj
+                }
+                val rightSameResult =
+                  sameJoin.get.asInstanceOf[SortMergeJoinExec].right.sameResult(smj.right)
+                // rc = right child
+                val rc = if (rightSameResult) {
+                  SortMergeJoinExec(leftKeys, rightKeys, joinType, condition,
+                    lc.left, ReusedChild(right.output), leftRowCount, rightRowCount, rowCount)
+                } else {
+                  lc
+                }
+                rc
+            }
+        }
+      }
+      val optimalPlan = transformedPlans.zipWithIndex.minBy { plan =>
+        var cost: BigDecimal = 0
+        plan._1 foreach {
+          case BroadcastHashJoinExec(
+          _, _, _, buildSide, _, left, right, leftRowCount, rightRowCount, _) =>
+            cost = cost + new BroadcastHashJoinPhysicalCost(
+              sparkSession.sqlContext.conf.physicalCboBroadcastWeight,
+              sparkSession.sqlContext.conf.physicalCboHashJoinWeight,
+              left,
+              right,
+              leftRowCount,
+              rightRowCount,
+              buildSide,
+              plan._1.schema.fields.length).get
+          case SortMergeJoinExec(_, _, _, _, left, right, leftRowCount, rightRowCount, _) =>
+            cost = cost + new SortMergeJoinPhysicalCost(
+              sparkSession.sqlContext.conf.physicalCboExchangeWeight,
+              sparkSession.sqlContext.conf.physicalCboSortWeight,
+              sparkSession.sqlContext.conf.physicalCboSortMergeJoinWeight,
+              left,
+              right,
+              leftRowCount,
+              rightRowCount,
+              left.schema.fields.length,
+              right.schema.fields.length).get
+          case _ =>
+        }
+        cost
+      }
+      val durationInMs = (System.nanoTime() - startTime) / (1000 * 1000)
+      logDebug(s"Optimal plan found. Duration: $durationInMs ms")
+      plans(optimalPlan._2)
     }
-    val durationInMs = (System.nanoTime() - startTime) / (1000 * 1000)
-    if (executedPlans.length > 1) {
-      logInfo(s"Optimal plan found. Duration: $durationInMs ms")
-    }
-    bestPlan
   }
 
   // executedPlan should not be used to initialize any SparkPlan. It should be
   // only used for execution.
   lazy val executedPlan: SparkPlan = {
     if (sparkSession.sqlContext.conf.physicalCboOptimizerEnabled) {
-      optimalSparkPlan
+      prepareForExecution(optimalSparkPlan)
     } else {
       prepareForExecution(sparkPlan)
     }

@@ -26,6 +26,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution.metric.SQLMetrics
+import org.apache.spark.sql.execution.physicalcosts.PhysicalCost
 
 /**
  * Performs (external) sorting.
@@ -62,20 +63,6 @@ case class SortExec(
     "spillSize" -> SQLMetrics.createSizeMetric(sparkContext, "spill size"))
 
   override protected def preCanonicalized: SortExec = copy(rowCount = None)
-
-  override lazy val cost: PhysicalCost = {
-    if (rowCount.isDefined) {
-      val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
-      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
-      val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
-      val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
-      val processingRowsInParallel = (rowCount.get / parallelization).toDouble
-      new PhysicalCost(BigDecimal(processingRowsInParallel) * BigDecimal(
-          math.max(math.log(processingRowsInParallel), 1)), 0, 0, 0)
-    } else {
-      new PhysicalCost(0, 0, 0, 0)
-    }
-  }
 
   def createSorter(): UnsafeExternalRowSorter = {
     val ordering = newOrdering(sortOrder, output)
