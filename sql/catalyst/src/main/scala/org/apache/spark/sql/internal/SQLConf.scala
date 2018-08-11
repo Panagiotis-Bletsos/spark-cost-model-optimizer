@@ -75,40 +75,30 @@ object SQLConf {
     .intConf
     .createWithDefault(13)
 
-  val PHYSICAL_COST_CPU_WEIGHT =
-    buildConf("spark.sql.physicalCbo.cpu.weight")
-      .internal()
-      .doc("The weight of CPU for physical plan cost")
-      .doubleConf
-      .createWithDefault(1)
+  val PHYSICAL_COST_BROADCAST_WEIGHT = buildConf("spark.sql.physicalCost.broadcastWeight")
+    .doc("The weight of broadcast cost")
+    .doubleConf
+    .createWithDefault(1.0)
 
-  val PHYSICAL_COST_IO_WRITE_WEIGHT =
-    buildConf("spark.sql.physicalCbo.io.write.weight")
-      .internal()
-      .doc("The weight of writing to disk for physical plan cost")
-      .doubleConf
-      .createWithDefault(1.19)
+  val PHYSICAL_COST_HASH_JOIN_WEIGHT = buildConf("spark.sql.physicalCost.hashJoinWeight")
+    .doc("The weight of hash join")
+    .doubleConf
+    .createWithDefault(1.0)
 
-  val PHYSICAL_COST_IO_READ_WEIGHT =
-    buildConf("spark.sql.physicalCbo.io.read.weight")
-      .internal()
-      .doc("The weight of reading from disk for physical plan cost")
-      .doubleConf
-      .createWithDefault(1.19)
+  val PHYSICAL_COST_EXCHANGE_WEIGHT = buildConf("spark.sql.physicalCost.exchangeWeight")
+    .doc("The weight of exchange operator")
+    .doubleConf
+    .createWithDefault(1.0)
 
-  val PHYSICAL_COST_NET_WEIGHT =
-    buildConf("spark.sql.physicalCbo.net.weight")
-      .internal()
-      .doc("The weight of Network for physical plan cost")
-      .doubleConf
-      .createWithDefault(1.2)
+  val PHYSICAL_COST_SORT_WEIGHT = buildConf("spark.sql.physicalCost.sortWeight")
+    .doc("The weight of sort operator")
+    .doubleConf
+    .createWithDefault(1.0)
 
-  val PHYSICAL_COST_HASHING_WEIGHT =
-    buildConf("spark.sql.physicalCbo.hashing.weight")
-      .internal()
-      .doc("The weight of hashing a table.")
-      .doubleConf
-      .createWithDefault(20)
+  val PHYSICAL_COST_SORT_MERGE_JOIN_WEIGHT = buildConf("spark.sql.physicalCost.sortMergeJoinWeight")
+    .doc("The weight of join operator in sort merge join algorithm")
+    .doubleConf
+    .createWithDefault(1.0)
 
   val OPTIMIZER_MAX_ITERATIONS = buildConf("spark.sql.optimizer.maxIterations")
     .internal()
@@ -874,15 +864,15 @@ class SQLConf extends Serializable with Logging {
 
   def physicalCboOptimizerMaxDepth: Int = getConf(PHYSICAL_COST_BASED_OPTIMIZER_MAX_DEPTH)
 
-  def physicalCboCPUWeight: Double = getConf(SQLConf.PHYSICAL_COST_CPU_WEIGHT)
+  def physicalCboBroadcastWeight: Double = getConf(PHYSICAL_COST_BROADCAST_WEIGHT)
 
-  def physicalCboIOWriteWeight: Double = getConf(SQLConf.PHYSICAL_COST_IO_WRITE_WEIGHT)
+  def physicalCboHashJoinWeight: Double = getConf(PHYSICAL_COST_HASH_JOIN_WEIGHT)
 
-  def physicalCboIOReadWeight: Double = getConf(SQLConf.PHYSICAL_COST_IO_READ_WEIGHT)
+  def physicalCboExchangeWeight: Double = getConf(PHYSICAL_COST_EXCHANGE_WEIGHT)
 
-  def physicalCboNetWeight: Double = getConf(SQLConf.PHYSICAL_COST_NET_WEIGHT)
+  def physicalCboSortWeight: Double = getConf(PHYSICAL_COST_SORT_WEIGHT)
 
-  def physicalCboHashingWeight: Double = getConf(SQLConf.PHYSICAL_COST_HASHING_WEIGHT)
+  def physicalCboSortMergeJoinWeight: Double = getConf(PHYSICAL_COST_SORT_MERGE_JOIN_WEIGHT)
 
   def optimizerMaxIterations: Int = getConf(OPTIMIZER_MAX_ITERATIONS)
 
