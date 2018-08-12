@@ -109,7 +109,7 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) e
               case None =>
                 joins.put((bhj.schema, condition), bhj)
                 bhj
-              case _ =>
+              case Some(BroadcastHashJoinExec(_, _, _, _, _, _, _, _, _, _)) =>
                 val newJoin = buildSide match {
                   case BuildLeft =>
                     val sameResult = sameJoin
@@ -131,6 +131,7 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) e
                     }
                 }
                 newJoin
+              case _ => bhj
             }
           case smj @ SortMergeJoinExec(leftKeys, rightKeys, joinType, condition, left, right,
           leftRowCount, rightRowCount, rowCount) =>
@@ -139,7 +140,7 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) e
               case None =>
                 joins.put((smj.schema, condition), smj)
                 smj
-              case _ =>
+              case Some(SortMergeJoinExec(_, _, _, _, _, _, _, _, _)) =>
                 val leftSameResult =
                   sameJoin.get.asInstanceOf[SortMergeJoinExec].left.sameResult(smj.left)
                 // lc = left child
@@ -159,6 +160,7 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) e
                   lc
                 }
                 rc
+              case _ => smj
             }
         }
       }
