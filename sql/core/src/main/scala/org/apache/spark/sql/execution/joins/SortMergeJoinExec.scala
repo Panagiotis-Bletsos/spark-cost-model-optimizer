@@ -42,7 +42,8 @@ case class SortMergeJoinExec(
     right: SparkPlan) extends BinaryExecNode with CodegenSupport {
 
   override lazy val metrics = Map(
-    "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"))
+    "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"),
+    "elapsedTime" -> SQLMetrics.createTimingMetric(sparkContext, "join time total (mid, med, max)"))
 
   override def output: Seq[Attribute] = {
     joinType match {
@@ -132,6 +133,7 @@ case class SortMergeJoinExec(
 
   protected override def doExecute(): RDD[InternalRow] = {
     val numOutputRows = longMetric("numOutputRows")
+    val elapsedTime = longMetric("elapsedTime")
     val spillThreshold = getSpillThreshold
     left.execute().zipPartitions(right.execute()) { (leftIter, rightIter) =>
       val boundCondition: (InternalRow) => Boolean = {
@@ -562,6 +564,8 @@ case class SortMergeJoinExec(
 
     val iterator = ctx.freshName("iterator")
     val numOutput = metricTerm(ctx, "numOutputRows")
+    val beforeJoin = ctx.freshName("beforeJoin")
+    val elapsedTime = metricTerm(ctx, "elapsedTime")
     val (beforeLoop, condCheck) = if (condition.isDefined) {
       // Split the code of creating variables based on whether it's used by condition or not.
       val loaded = ctx.freshName("loaded")
@@ -592,6 +596,7 @@ case class SortMergeJoinExec(
     }
 
     s"""
+       |long $beforeJoin = System.nanoTime();
        |while (findNextInnerJoinRows($leftInput, $rightInput)) {
        |  ${beforeLoop.trim}
        |  scala.collection.Iterator<UnsafeRow> $iterator = $matches.generateIterator();
@@ -603,6 +608,7 @@ case class SortMergeJoinExec(
        |  }
        |  if (shouldStop()) return;
        |}
+       |$elapsedTime.add((System.nanoTime() - $beforeJoin) / 1000000);
      """.stripMargin
   }
 }

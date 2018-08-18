@@ -46,7 +46,8 @@ case class BroadcastHashJoinExec(
   extends BinaryExecNode with HashJoin with CodegenSupport {
 
   override lazy val metrics = Map(
-    "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"))
+    "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"),
+    "elapsedTime" -> SQLMetrics.createTimingMetric(sparkContext, "join time total"))
 
   override def requiredChildDistribution: Seq[Distribution] = {
     val mode = HashedRelationBroadcastMode(buildKeys)
@@ -198,6 +199,8 @@ case class BroadcastHashJoinExec(
     val (keyEv, anyNull) = genStreamSideJoinKey(ctx, input)
     val (matched, checkCondition, buildVars) = getJoinCondition(ctx, input)
     val numOutput = metricTerm(ctx, "numOutputRows")
+    val elapsedTime = metricTerm(ctx, "elapsedTime")
+    val beforeJoin = ctx.freshName("beforeJoin")
 
     val resultVars = buildSide match {
       case BuildLeft => buildVars ++ input
@@ -205,6 +208,7 @@ case class BroadcastHashJoinExec(
     }
     if (broadcastRelation.value.keyIsUnique) {
       s"""
+         |long $beforeJoin = System.nanoTime();
          |// generate join key for stream side
          |${keyEv.code}
          |// find matches from HashedRelation
@@ -213,6 +217,7 @@ case class BroadcastHashJoinExec(
          |$checkCondition
          |$numOutput.add(1);
          |${consume(ctx, resultVars)}
+         |$elapsedTime.add((System.nanoTime() - $beforeJoin) / 1000000);
        """.stripMargin
 
     } else {
@@ -220,6 +225,7 @@ case class BroadcastHashJoinExec(
       val matches = ctx.freshName("matches")
       val iteratorCls = classOf[Iterator[UnsafeRow]].getName
       s"""
+         |long $beforeJoin = System.nanoTime();
          |// generate join key for stream side
          |${keyEv.code}
          |// find matches from HashRelation
@@ -231,6 +237,7 @@ case class BroadcastHashJoinExec(
          |  $numOutput.add(1);
          |  ${consume(ctx, resultVars)}
          |}
+         |$elapsedTime.add((System.nanoTime() - $beforeJoin) / 1000000);
        """.stripMargin
     }
   }

@@ -44,7 +44,8 @@ case class ShuffleExchange(
   //       e.g. it can be null on the Executor side
 
   override lazy val metrics = Map(
-    "dataSize" -> SQLMetrics.createSizeMetric(sparkContext, "data size"))
+    "dataSize" -> SQLMetrics.createSizeMetric(sparkContext, "data size"),
+    "exchangeTime" -> SQLMetrics.createTimingMetric(sparkContext, "exchange time"))
 
   override def nodeName: String = {
     val extraInfo = coordinator match {
@@ -104,7 +105,8 @@ case class ShuffleExchange(
       assert(newPartitioning.isInstanceOf[HashPartitioning])
       newPartitioning = UnknownPartitioning(indices.length)
     }
-    new ShuffledRowRDD(shuffleDependency, specifiedPartitionStartIndices)
+    new ShuffledRowRDD(
+      shuffleDependency, specifiedPartitionStartIndices, longMetric("exchangeTime"))
   }
 
   /**
