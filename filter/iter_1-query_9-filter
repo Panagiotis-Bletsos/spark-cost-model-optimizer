@@ -1,6 +1,0 @@
-Filter (((isnotnull(ss_cdemo_sk#18117) && isnotnull(ss_sold_date_sk#18113)) && isnotnull(ss_item_sk#18115)) && isnotnull(ss_promo_sk#18121))
-Filter ((((isnotnull(cd_gender#18137) && isnotnull(cd_marital_status#18138)) && isnotnull(cd_education_status#18139)) && (((cd_gender#18137 = M) && (cd_marital_status#18138 = S)) && (cd_education_status#18139 = College))) && isnotnull(cd_demo_sk#18136))
-Filter ((isnotnull(d_year#18151) && (d_year#18151 = 2000)) && isnotnull(d_date_sk#18145))
-Filter isnotnull(i_item_sk#18173)
-Filter (((p_channel_email#18204 = N) || (p_channel_event#18209 = N)) && isnotnull(p_promo_sk#18195))
-Filter ((((((isnotnull(cd_gender#18137) && isnotnull(cd_marital_status#18138)) && isnotnull(cd_education_status#18139)) && (cd_gender#18137 = M)) && (cd_marital_status#18138 = S)) && (cd_education_status#18139 = College)) && isnotnull(cd_demo_sk#18136))

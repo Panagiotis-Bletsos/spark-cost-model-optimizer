@@ -1,3 +1,0 @@
-Filter ((isnotnull(d_moy#35893) && (d_moy#35893 = 11)) && isnotnull(d_date_sk#35885))
-Filter (isnotnull(ss_sold_date_sk#35913) && isnotnull(ss_item_sk#35915))
-Filter ((isnotnull(i_manufact_id#35949) && (i_manufact_id#35949 = 128)) && isnotnull(i_item_sk#35936))
