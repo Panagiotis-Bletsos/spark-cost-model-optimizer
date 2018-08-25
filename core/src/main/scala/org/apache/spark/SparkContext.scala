@@ -86,6 +86,12 @@ class SparkContext(config: SparkConf) extends Logging {
 
   val startTime = System.currentTimeMillis()
 
+  private var _queryName = ""
+
+  def queryName: String = _queryName
+
+  def queryName_=(newVal: String): Unit = _queryName = newVal
+
   private[spark] val stopped: AtomicBoolean = new AtomicBoolean(false)
 
   private[spark] def assertNotStopped(): Unit = {

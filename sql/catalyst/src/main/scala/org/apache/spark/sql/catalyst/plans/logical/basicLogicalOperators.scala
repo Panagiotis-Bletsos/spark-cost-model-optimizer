@@ -17,6 +17,9 @@
 
 package org.apache.spark.sql.catalyst.plans.logical
 
+import java.io.{File, FileWriter, PrintWriter}
+
+import org.apache.spark.SparkContext
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
 import org.apache.spark.sql.catalyst.catalog.CatalogTable
 import org.apache.spark.sql.catalyst.expressions._
@@ -139,6 +142,18 @@ case class Filter(condition: Expression, child: LogicalPlan)
   }
 
   override def computeStats(conf: SQLConf): Statistics = {
+    val sc: SparkContext = SparkContext.getActive.get
+    val that = this
+    val directory = new File(s"./filter")
+    if (!directory.exists) {
+      directory.mkdirs
+      // If you require it to make the entire directory path including parents,
+      // use directory.mkdirs(); here instead.
+    }
+    val fw = new FileWriter(s"$directory/${sc.queryName}-filter", true)
+    try {
+      fw.write(s"${that.simpleString}\n")
+    } finally fw.close()
     if (conf.cboEnabled) {
       FilterEstimation(this, conf).estimate.getOrElse(super.computeStats(conf))
     } else {
@@ -295,6 +310,7 @@ case class Join(
     joinType: JoinType,
     condition: Option[Expression])
   extends BinaryNode with PredicateHelper {
+  val sc: SparkContext = SparkContext.getActive.get
 
   override def output: Seq[Attribute] = {
     joinType match {
@@ -368,6 +384,17 @@ case class Join(
         stats.copy(hints = stats.hints.resetForJoin())
     }
 
+    val that = this
+    val directory = new File(s"./join")
+    if (!directory.exists) {
+      directory.mkdirs
+      // If you require it to make the entire directory path including parents,
+      // use directory.mkdirs(); here instead.
+    }
+    val fw = new FileWriter(s"$directory/${sc.queryName}-join", true)
+    try {
+      fw.write(s"${that.simpleString}\n")
+    } finally fw.close()
     if (conf.cboEnabled) {
       JoinEstimation.estimate(conf, this).getOrElse(simpleEstimation)
     } else {

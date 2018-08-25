@@ -1,0 +1,6 @@
+Filter (((isnotnull(ss_cdemo_sk#35988) && isnotnull(ss_sold_date_sk#35984)) && isnotnull(ss_item_sk#35986)) && isnotnull(ss_promo_sk#35992))
+Filter ((((isnotnull(cd_gender#36008) && isnotnull(cd_education_status#36010)) && isnotnull(cd_marital_status#36009)) && (((cd_gender#36008 = M) && (cd_marital_status#36009 = S)) && (cd_education_status#36010 = College))) && isnotnull(cd_demo_sk#36007))
+Filter ((isnotnull(d_year#36022) && (d_year#36022 = 2000)) && isnotnull(d_date_sk#36016))
+Filter isnotnull(i_item_sk#36044)
+Filter (((p_channel_email#36075 = N) || (p_channel_event#36080 = N)) && isnotnull(p_promo_sk#36066))
+Filter ((((((isnotnull(cd_gender#36008) && isnotnull(cd_education_status#36010)) && isnotnull(cd_marital_status#36009)) && (cd_gender#36008 = M)) && (cd_marital_status#36009 = S)) && (cd_education_status#36010 = College)) && isnotnull(cd_demo_sk#36007))

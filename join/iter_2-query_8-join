@@ -1,0 +1,4 @@
+Join Inner, (ss_item_sk#35915 = i_item_sk#35936)
+Join Inner, (d_date_sk#35885 = ss_sold_date_sk#35913)
+Join Inner, (ss_item_sk#35915 = i_item_sk#35936)
+Join Inner, (d_date_sk#35885 = ss_sold_date_sk#35913)
