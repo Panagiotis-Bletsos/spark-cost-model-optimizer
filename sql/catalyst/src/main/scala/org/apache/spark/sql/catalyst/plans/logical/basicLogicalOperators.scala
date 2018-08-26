@@ -164,7 +164,7 @@ case class Filter(condition: Expression, child: LogicalPlan)
       .put("canonicalized", this.canonicalized.toString)
       .put("canonicalizedExpression", this.condition.canonicalized.toString)
     try {
-      fw.write(s"${jsonMapper.writeValueAsString(objectNode)}\n")
+      fw.write(s"${jsonMapper.writeValueAsString(objectNode)}")
     } finally fw.close()
     if (conf.cboEnabled) {
       FilterEstimation(this, conf).estimate.getOrElse(super.computeStats(conf))
@@ -419,7 +419,7 @@ case class Join(
       .put("conditionCanonicalized",
         if (this.condition.isDefined) this.condition.get.canonicalized.toString else "")
     try {
-      fw.write(s"${jsonMapper.writeValueAsString(objectNode)}\n")
+      fw.write(s"${jsonMapper.writeValueAsString(objectNode)}")
     } finally fw.close()
     if (conf.cboEnabled) {
       JoinEstimation.estimate(conf, this).getOrElse(simpleEstimation)
