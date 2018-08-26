@@ -17,6 +17,13 @@
 
 package org.apache.spark.sql.catalyst.plans.logical
 
+import java.io.FileInputStream
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import com.fasterxml.jackson.module.scala.experimental.ScalaObjectMapper
+
+import org.apache.spark.SparkContext
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
 import org.apache.spark.sql.catalyst.catalog.CatalogTable
 import org.apache.spark.sql.catalyst.expressions._
@@ -126,6 +133,8 @@ case class Generate(
   }
 }
 
+case class FilterStats(name: String, totalRows: Long, size: Long)
+
 case class Filter(condition: Expression, child: LogicalPlan)
   extends UnaryNode with PredicateHelper {
   override def output: Seq[Attribute] = child.output
@@ -139,6 +148,19 @@ case class Filter(condition: Expression, child: LogicalPlan)
   }
 
   override def computeStats(conf: SQLConf): Statistics = {
+    val sc = SparkContext.getOrCreate()
+    val sparkConf = sc.conf.get("spark.stats.dir")
+    val stream =
+      new FileInputStream(s"$sparkConf/iter_1-query_${sc.queryName}-filter.json")
+    val mapper = new ObjectMapper() with ScalaObjectMapper
+    mapper.registerModule(DefaultScalaModule)
+    val stats = mapper.readValue[Seq[FilterStats]](stream)
+    val name = this.simpleString
+    val stat = stats.find(x => x.name == name)
+    stat match {
+      case Some(FilterStats(_, _, _)) => logDebug("found")
+      case _ => logDebug("not found")
+    }
     if (conf.cboEnabled) {
       FilterEstimation(this, conf).estimate.getOrElse(super.computeStats(conf))
     } else {
