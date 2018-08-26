@@ -19,6 +19,9 @@ package org.apache.spark.sql.catalyst.plans.logical
 
 import java.io.{File, FileWriter, PrintWriter}
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.scala.DefaultScalaModule
+
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
 import org.apache.spark.sql.catalyst.catalog.CatalogTable
@@ -151,8 +154,15 @@ case class Filter(condition: Expression, child: LogicalPlan)
       // use directory.mkdirs(); here instead.
     }
     val fw = new FileWriter(s"$directory/${sc.queryName}-filter", true)
+    val jsonMapper = new ObjectMapper().registerModule(DefaultScalaModule)
+    val objectNode = jsonMapper.createObjectNode()
+    objectNode
+      .put("sqlCondition", this.condition.sql)
+      .put("simpleString", this.simpleString)
+      .put("canonicalized", this.canonicalized.toString)
+      .put("canonicalizedExpression", this.condition.canonicalized.toString)
     try {
-      fw.write(s"${that.simpleString}\n")
+      fw.write(s"${jsonMapper.writeValueAsString(objectNode)}\n")
     } finally fw.close()
     if (conf.cboEnabled) {
       FilterEstimation(this, conf).estimate.getOrElse(super.computeStats(conf))
@@ -388,12 +398,24 @@ case class Join(
     val directory = new File(s"./join")
     if (!directory.exists) {
       directory.mkdirs
-      // If you require it to make the entire directory path including parents,
-      // use directory.mkdirs(); here instead.
     }
     val fw = new FileWriter(s"$directory/${sc.queryName}-join", true)
+    val jsonMapper = new ObjectMapper().registerModule(DefaultScalaModule)
+    val objectNode = jsonMapper.createObjectNode()
+    objectNode
+      .put("leftCanonicalized", this.left.canonicalized.toString)
+      .put("rightCanonicalized", this.right.canonicalized.toString)
+      .put("left", this.left.simpleString)
+      .put("right", this.right.simpleString)
+      .put("joinType", this.joinType.toString)
+      .put("joinTypeSql", this.joinType.sql)
+      .put("simpleString", this.simpleString)
+      .put("canonicalized", this.canonicalized.toString)
+      .put("condition", if (this.condition.isDefined) this.condition.get.toString else "")
+      .put("conditionCanonicalized",
+        if (this.condition.isDefined) this.condition.get.canonicalized.toString else "")
     try {
-      fw.write(s"${that.simpleString}\n")
+      fw.write(s"${jsonMapper.writeValueAsString(objectNode)}\n")
     } finally fw.close()
     if (conf.cboEnabled) {
       JoinEstimation.estimate(conf, this).getOrElse(simpleEstimation)
