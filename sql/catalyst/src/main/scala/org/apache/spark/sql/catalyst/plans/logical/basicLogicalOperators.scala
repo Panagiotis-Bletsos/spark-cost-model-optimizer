@@ -157,6 +157,8 @@ case class Filter(condition: Expression, child: LogicalPlan)
     val jsonMapper = new ObjectMapper().registerModule(DefaultScalaModule)
     val objectNode = jsonMapper.createObjectNode()
     objectNode
+      .put("totalRows", -1)
+      .put("size", -1)
       .put("sqlCondition", this.condition.sql)
       .put("simpleString", this.simpleString)
       .put("canonicalized", this.canonicalized.toString)
@@ -403,6 +405,8 @@ case class Join(
     val jsonMapper = new ObjectMapper().registerModule(DefaultScalaModule)
     val objectNode = jsonMapper.createObjectNode()
     objectNode
+      .put("totalRows", -1)
+      .put("size", -1)
       .put("leftCanonicalized", this.left.canonicalized.toString)
       .put("rightCanonicalized", this.right.canonicalized.toString)
       .put("left", this.left.simpleString)
