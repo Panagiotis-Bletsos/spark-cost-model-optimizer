@@ -151,7 +151,7 @@ case class Filter(condition: Expression, child: LogicalPlan)
     val sc = SparkContext.getOrCreate()
     val sparkConf = sc.conf.get("spark.stats.dir")
     val stream =
-      new FileInputStream(s"$sparkConf/iter_1-query_${sc.queryName}-filter.json")
+      new FileInputStream(s"$sparkConf/filter/iter_1-query_${sc.queryName}-filter.json")
     val mapper = new ObjectMapper() with ScalaObjectMapper
     mapper.registerModule(DefaultScalaModule)
     val stats = mapper.readValue[Seq[FilterStats]](stream)
