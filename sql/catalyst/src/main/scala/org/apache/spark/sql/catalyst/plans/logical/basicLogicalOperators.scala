@@ -19,6 +19,9 @@ package org.apache.spark.sql.catalyst.plans.logical
 
 import java.io.FileInputStream
 
+import scala.collection.mutable
+
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import com.fasterxml.jackson.module.scala.experimental.ScalaObjectMapper
@@ -133,7 +136,11 @@ case class Generate(
   }
 }
 
-case class FilterStats(name: String, totalRows: Long, size: Long)
+case class FilterStats(totalRows: Long, size: Long)
+
+object StatsManager {
+  val queryBuffer: mutable.Map[String, Int] = mutable.Map.empty
+}
 
 case class Filter(condition: Expression, child: LogicalPlan)
   extends UnaryNode with PredicateHelper {
@@ -148,23 +155,27 @@ case class Filter(condition: Expression, child: LogicalPlan)
   }
 
   override def computeStats(conf: SQLConf): Statistics = {
-    val sc = SparkContext.getOrCreate()
-    val sparkConf = sc.conf.get("spark.stats.dir")
-    val stream =
-      new FileInputStream(s"$sparkConf/filter/iter_1-query_${sc.queryName}-filter.json")
+    val sc = SparkContext.getActive.get
+    val statsDir = sc.conf.get("spark.stats.dir")
+    val filename = s"${sc.queryName}-filter"
+    val statsOffset = StatsManager.queryBuffer.getOrElse(filename, 0)
+    StatsManager.queryBuffer.put(filename, statsOffset + 1)
+    val stream = new FileInputStream(s"$statsDir/filter/$filename.json")
     val mapper = new ObjectMapper() with ScalaObjectMapper
+    mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     mapper.registerModule(DefaultScalaModule)
     val stats = mapper.readValue[Seq[FilterStats]](stream)
-    val name = this.simpleString
-    val stat = stats.find(x => x.name == name)
-    stat match {
-      case Some(FilterStats(_, _, _)) => logDebug("found")
-      case _ => logDebug("not found")
-    }
-    if (conf.cboEnabled) {
-      FilterEstimation(this, conf).estimate.getOrElse(super.computeStats(conf))
-    } else {
-      super.computeStats(conf)
+    try {
+      val stat = stats(statsOffset)
+      Statistics(stat.size, Some(stat.totalRows))
+    } catch {
+      case e: Exception =>
+        logWarning(s"Could not retrieve stats from file $filename | Exception: ${e.getMessage}")
+        if (conf.cboEnabled) {
+          FilterEstimation(this, conf).estimate.getOrElse(super.computeStats(conf))
+        } else {
+          super.computeStats(conf)
+        }
     }
   }
 }
@@ -311,6 +322,8 @@ case class Union(children: Seq[LogicalPlan]) extends LogicalPlan {
   }
 }
 
+case class JoinStats(totalRows: Long, size: Long)
+
 case class Join(
     left: LogicalPlan,
     right: LogicalPlan,
@@ -390,10 +403,27 @@ case class Join(
         stats.copy(hints = stats.hints.resetForJoin())
     }
 
-    if (conf.cboEnabled) {
-      JoinEstimation.estimate(conf, this).getOrElse(simpleEstimation)
-    } else {
-      simpleEstimation
+    val sc = SparkContext.getActive.get
+    val statsDir = sc.conf.get("spark.stats.dir")
+    val filename = s"${sc.queryName}-join"
+    val statsOffset = StatsManager.queryBuffer.getOrElse(filename, 0)
+    StatsManager.queryBuffer.put(filename, statsOffset + 1)
+    val stream = new FileInputStream(s"$statsDir/join/$filename.json")
+    val mapper = new ObjectMapper() with ScalaObjectMapper
+    mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+    mapper.registerModule(DefaultScalaModule)
+    val stats = mapper.readValue[Seq[JoinStats]](stream)
+    try {
+      val stat = stats(statsOffset)
+      Statistics(stat.size, Some(stat.totalRows))
+    } catch {
+      case e: Exception =>
+        logWarning(s"Could not retrieve stats from file $filename | Exception: ${e.getMessage}")
+        if (conf.cboEnabled) {
+          JoinEstimation.estimate(conf, this).getOrElse(simpleEstimation)
+        } else {
+          simpleEstimation
+        }
     }
   }
 }
