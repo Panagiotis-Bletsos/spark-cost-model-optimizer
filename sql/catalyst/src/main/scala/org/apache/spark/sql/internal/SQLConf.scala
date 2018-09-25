@@ -75,30 +75,68 @@ object SQLConf {
     .intConf
     .createWithDefault(13)
 
-  val PHYSICAL_COST_BROADCAST_WEIGHT = buildConf("spark.sql.physicalCost.broadcastWeight")
-    .doc("The weight of broadcast cost")
+  val PHYSICAL_COST_BROADCAST_PARAMETER_A = buildConf("spark.sql.physicalCost.broadcastParameter.a")
     .doubleConf
     .createWithDefault(1.0)
 
-  val PHYSICAL_COST_HASH_JOIN_WEIGHT = buildConf("spark.sql.physicalCost.hashJoinWeight")
-    .doc("The weight of hash join")
+  val PHYSICAL_COST_BROADCAST_PARAMETER_B = buildConf("spark.sql.physicalCost.broadcastParameter.b")
     .doubleConf
     .createWithDefault(1.0)
 
-  val PHYSICAL_COST_EXCHANGE_WEIGHT = buildConf("spark.sql.physicalCost.exchangeWeight")
-    .doc("The weight of exchange operator")
+  val PHYSICAL_COST_BROADCAST_PARAMETER_C = buildConf("spark.sql.physicalCost.broadcastParameter.c")
     .doubleConf
     .createWithDefault(1.0)
 
-  val PHYSICAL_COST_SORT_WEIGHT = buildConf("spark.sql.physicalCost.sortWeight")
-    .doc("The weight of sort operator")
+  val PHYSICAL_COST_HASH_JOIN_PARAMETER_A = buildConf("spark.sql.physicalCost.hashJoinParameter.a")
     .doubleConf
     .createWithDefault(1.0)
 
-  val PHYSICAL_COST_SORT_MERGE_JOIN_WEIGHT = buildConf("spark.sql.physicalCost.sortMergeJoinWeight")
-    .doc("The weight of join operator in sort merge join algorithm")
+  val PHYSICAL_COST_HASH_JOIN_PARAMETER_B = buildConf("spark.sql.physicalCost.hashJoinParameter.b")
     .doubleConf
     .createWithDefault(1.0)
+
+  val PHYSICAL_COST_HASH_JOIN_PARAMETER_C = buildConf("spark.sql.physicalCost.hashJoinParameter.c")
+    .doubleConf
+    .createWithDefault(1.0)
+
+  val PHYSICAL_COST_EXCHANGE_PARAMETER_A = buildConf("spark.sql.physicalCost.exchangeParameter.a")
+    .doubleConf
+    .createWithDefault(1.0)
+
+  val PHYSICAL_COST_EXCHANGE_PARAMETER_B = buildConf("spark.sql.physicalCost.exchangeParameter.b")
+    .doubleConf
+    .createWithDefault(1.0)
+
+  val PHYSICAL_COST_EXCHANGE_PARAMETER_C = buildConf("spark.sql.physicalCost.exchangeParameter.c")
+    .doubleConf
+    .createWithDefault(1.0)
+
+  val PHYSICAL_COST_SORT_PARAMETER_A = buildConf("spark.sql.physicalCost.sortParameter.a")
+    .doubleConf
+    .createWithDefault(1.0)
+
+  val PHYSICAL_COST_SORT_PARAMETER_B = buildConf("spark.sql.physicalCost.sortParameter.b")
+    .doubleConf
+    .createWithDefault(1.0)
+
+  val PHYSICAL_COST_SORT_PARAMETER_C = buildConf("spark.sql.physicalCost.sortParameter.c")
+    .doubleConf
+    .createWithDefault(1.0)
+
+  val PHYSICAL_COST_SORT_MERGE_JOIN_PARAMETER_A =
+    buildConf("spark.sql.physicalCost.sortMergeJoinParameter.a")
+      .doubleConf
+      .createWithDefault(1.0)
+
+  val PHYSICAL_COST_SORT_MERGE_JOIN_PARAMETER_B =
+    buildConf("spark.sql.physicalCost.sortMergeJoinParameter.b")
+      .doubleConf
+      .createWithDefault(1.0)
+
+  val PHYSICAL_COST_SORT_MERGE_JOIN_PARAMETER_C =
+    buildConf("spark.sql.physicalCost.sortMergeJoinParameter.c")
+      .doubleConf
+      .createWithDefault(1.0)
 
   val OPTIMIZER_MAX_ITERATIONS = buildConf("spark.sql.optimizer.maxIterations")
     .internal()
@@ -864,15 +902,38 @@ class SQLConf extends Serializable with Logging {
 
   def physicalCboOptimizerMaxDepth: Int = getConf(PHYSICAL_COST_BASED_OPTIMIZER_MAX_DEPTH)
 
-  def physicalCboBroadcastWeight: Double = getConf(PHYSICAL_COST_BROADCAST_WEIGHT)
+  def physicalCboBroadcastParameterA: Double = getConf(PHYSICAL_COST_BROADCAST_PARAMETER_A)
 
-  def physicalCboHashJoinWeight: Double = getConf(PHYSICAL_COST_HASH_JOIN_WEIGHT)
+  def physicalCboBroadcastParameterB: Double = getConf(PHYSICAL_COST_BROADCAST_PARAMETER_B)
 
-  def physicalCboExchangeWeight: Double = getConf(PHYSICAL_COST_EXCHANGE_WEIGHT)
+  def physicalCboBroadcastParameterC: Double = getConf(PHYSICAL_COST_BROADCAST_PARAMETER_C)
 
-  def physicalCboSortWeight: Double = getConf(PHYSICAL_COST_SORT_WEIGHT)
+  def physicalCboHashJoinParameterA: Double = getConf(PHYSICAL_COST_HASH_JOIN_PARAMETER_A)
 
-  def physicalCboSortMergeJoinWeight: Double = getConf(PHYSICAL_COST_SORT_MERGE_JOIN_WEIGHT)
+  def physicalCboHashJoinParameterB: Double = getConf(PHYSICAL_COST_HASH_JOIN_PARAMETER_B)
+
+  def physicalCboHashJoinParameterC: Double = getConf(PHYSICAL_COST_HASH_JOIN_PARAMETER_C)
+
+  def physicalCboExchangeParameterA: Double = getConf(PHYSICAL_COST_EXCHANGE_PARAMETER_A)
+
+  def physicalCboExchangeParameterB: Double = getConf(PHYSICAL_COST_EXCHANGE_PARAMETER_B)
+
+  def physicalCboExchangeParameterC: Double = getConf(PHYSICAL_COST_EXCHANGE_PARAMETER_C)
+
+  def physicalCboSortParameterA: Double = getConf(PHYSICAL_COST_SORT_PARAMETER_A)
+
+  def physicalCboSortParameterB: Double = getConf(PHYSICAL_COST_SORT_PARAMETER_B)
+
+  def physicalCboSortParameterC: Double = getConf(PHYSICAL_COST_SORT_PARAMETER_C)
+
+  def physicalCboSortMergeJoinParameterA: Double =
+    getConf(PHYSICAL_COST_SORT_MERGE_JOIN_PARAMETER_A)
+
+  def physicalCboSortMergeJoinParameterB: Double =
+    getConf(PHYSICAL_COST_SORT_MERGE_JOIN_PARAMETER_B)
+
+  def physicalCboSortMergeJoinParameterC: Double =
+    getConf(PHYSICAL_COST_SORT_MERGE_JOIN_PARAMETER_C)
 
   def optimizerMaxIterations: Int = getConf(OPTIMIZER_MAX_ITERATIONS)
 

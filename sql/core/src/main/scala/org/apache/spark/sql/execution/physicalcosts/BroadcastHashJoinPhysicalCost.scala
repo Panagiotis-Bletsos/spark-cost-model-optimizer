@@ -23,9 +23,13 @@ import org.apache.spark.sql.catalyst.expressions.UnsafeRow
 import org.apache.spark.sql.execution.{ReusedChild, SparkPlan}
 import org.apache.spark.sql.execution.joins.{BuildLeft, BuildRight, BuildSide}
 
+case class BroadcastCostParameters(a: BigDecimal, b: BigDecimal, c: BigDecimal)
+
+case class BroadcastHashJoinCostParameters(a: BigDecimal, b: BigDecimal, c: BigDecimal)
+
 class BroadcastHashJoinPhysicalCost(
-  broadcastWeight: Double,
-  joinWeight: Double,
+  broadcastCostParameters: BroadcastCostParameters,
+  broadcastHashJoinCostParameters: BroadcastHashJoinCostParameters,
   left: SparkPlan,
   right: SparkPlan,
   leftRowCount: Option[BigInt],
@@ -45,12 +49,12 @@ class BroadcastHashJoinPhysicalCost(
     }
     if (rowCount.isDefined) {
       val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
-      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
-      val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
-      val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
-      val processingRowsInParallel = BigDecimal(rowCount.get / parallelization)
       val rowSize = UnsafeRow.calculateFixedPortionByteSize(totalFields)
-      broadcastWeight * rowSize * processingRowsInParallel
+      val totalSize = rowCount.get * rowSize
+      val sizePerExecutor = BigDecimal(totalSize / numOfExecutors)
+      broadcastCostParameters.a *
+        BigDecimal(Math.pow(sizePerExecutor.toDouble, broadcastCostParameters.b.toDouble)) +
+        broadcastCostParameters.c
     } else {
       BigDecimal(0)
     }
@@ -61,9 +65,10 @@ class BroadcastHashJoinPhysicalCost(
     val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
     lazy val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
     val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
-    val processingRowsInParallel = BigDecimal(
-      leftRowCount.getOrElse(BigInt(1)) * rightRowCount.getOrElse(BigInt(1)) / parallelization)
-    joinWeight * processingRowsInParallel
+    val leftParallel = BigDecimal(leftRowCount.getOrElse(BigInt(1)) / parallelization)
+    val rightParallel = BigDecimal(rightRowCount.getOrElse(BigInt(1)) / parallelization)
+    broadcastHashJoinCostParameters.a + broadcastHashJoinCostParameters.b * leftParallel +
+      broadcastHashJoinCostParameters.c * rightParallel.pow(2)
   }
 
   override lazy val get: BigDecimal = {

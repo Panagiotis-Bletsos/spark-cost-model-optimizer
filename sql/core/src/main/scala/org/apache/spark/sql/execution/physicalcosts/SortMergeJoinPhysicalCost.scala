@@ -17,14 +17,21 @@
 
 package org.apache.spark.sql.execution.physicalcosts
 
+import org.apache.spark.SparkContext
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow
 import org.apache.spark.sql.execution.{ReusedChild, SparkPlan}
 
+case class SortCostParameters(a: BigDecimal, b: BigDecimal, c: BigDecimal)
+
+case class ExchangeCostParameters(a: BigDecimal, b: BigDecimal, c: BigDecimal)
+
+case class SortMergeJoinCostParameters(a: BigDecimal, b: BigDecimal, c: BigDecimal)
+
 class SortMergeJoinPhysicalCost(
-  exchangeWeight: Double,
-  sortWeight: Double,
-  joinWeight: Double,
+  exchangeParameters: ExchangeCostParameters,
+  sortParameters: SortCostParameters,
+  sortMergeJoinParameters: SortMergeJoinCostParameters,
   left: SparkPlan,
   right: SparkPlan,
   leftRowCount: Option[BigInt],
@@ -35,16 +42,17 @@ class SortMergeJoinPhysicalCost(
   @transient
   final val sqlContext = SparkSession.getActiveSession.map(_.sqlContext).orNull
 
-  protected def sparkContext = sqlContext.sparkContext
+  protected def sparkContext: SparkContext = sqlContext.sparkContext
 
   private def joinCost: BigDecimal = {
     val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
     val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
     lazy val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
     val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
-    val processingRowsInParallel = BigDecimal(
-      leftRowCount.getOrElse(BigInt(1)) * rightRowCount.getOrElse(BigInt(1)) / parallelization)
-    joinWeight * processingRowsInParallel
+    val leftParallel = BigDecimal(leftRowCount.getOrElse(BigInt(1)) / parallelization)
+    val rightParallel = BigDecimal(rightRowCount.getOrElse(BigInt(1)) / parallelization)
+    sortMergeJoinParameters.a + sortMergeJoinParameters.b * leftParallel +
+      sortMergeJoinParameters.c * rightParallel.pow(2)
   }
 
   private def sortCost(rowCount: Option[BigInt]): BigDecimal = {
@@ -54,7 +62,8 @@ class SortMergeJoinPhysicalCost(
       val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
       val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
       val processingRowsInParallel = (rowCount.get / parallelization).toDouble
-      sortWeight * processingRowsInParallel
+      sortParameters.a * BigDecimal(Math.pow(processingRowsInParallel, sortParameters.b.toDouble)) +
+        sortParameters.c
     } else {
       BigDecimal(0)
     }
@@ -63,12 +72,12 @@ class SortMergeJoinPhysicalCost(
   private def exchangeCost(rowCount: Option[BigInt], totalFields: Int): BigDecimal = {
     if (rowCount.isDefined) {
       val numOfExecutors = sparkContext.getExecutorMemoryStatus.size
-      val tasksPerCpu = sparkContext.conf.getInt("spark.task.cpus", 1)
-      val coresPerExecutor = sparkContext.conf.getInt("spark.executor.cores", 1)
-      val parallelization = math.max(numOfExecutors * (coresPerExecutor / tasksPerCpu), 1)
-      val processingRowsInParallel = BigDecimal(rowCount.get / parallelization)
       val rowSize = UnsafeRow.calculateFixedPortionByteSize(totalFields)
-      exchangeWeight * processingRowsInParallel * rowSize
+      val totalSize = BigDecimal(rowCount.get * rowSize)
+      val sizePerExecutor: BigDecimal = totalSize / numOfExecutors
+      exchangeParameters.a *
+        BigDecimal(Math.pow(sizePerExecutor.toDouble, exchangeParameters.b.toDouble)) +
+        exchangeParameters.c
     } else {
       BigDecimal(0)
     }

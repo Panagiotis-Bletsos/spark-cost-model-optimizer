@@ -34,7 +34,7 @@ import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.execution.command.{DescribeTableCommand, ExecutedCommandExec, ShowTablesCommand}
 import org.apache.spark.sql.execution.exchange.{EnsureRequirements, ReuseExchange}
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, BuildLeft, PlanLaterJoin, SortMergeJoinExec}
-import org.apache.spark.sql.execution.physicalcosts.{BroadcastHashJoinPhysicalCost, SortMergeJoinPhysicalCost}
+import org.apache.spark.sql.execution.physicalcosts._
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{BinaryType, DateType, DecimalType, TimestampType, _}
 import org.apache.spark.util.Utils
@@ -169,9 +169,17 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) e
         plan._1 foreach {
           case BroadcastHashJoinExec(
           _, _, _, buildSide, _, left, right, leftRowCount, rightRowCount, _) =>
+            val broadcastCostParameters = BroadcastCostParameters(
+              sparkSession.sqlContext.conf.physicalCboBroadcastParameterA,
+              sparkSession.sqlContext.conf.physicalCboBroadcastParameterB,
+              sparkSession.sqlContext.conf.physicalCboBroadcastParameterC)
+            val hashJoinCostParameters = BroadcastHashJoinCostParameters(
+              sparkSession.sqlContext.conf.physicalCboHashJoinParameterA,
+              sparkSession.sqlContext.conf.physicalCboHashJoinParameterB,
+              sparkSession.sqlContext.conf.physicalCboHashJoinParameterC)
             cost = cost + new BroadcastHashJoinPhysicalCost(
-              sparkSession.sqlContext.conf.physicalCboBroadcastWeight,
-              sparkSession.sqlContext.conf.physicalCboHashJoinWeight,
+              broadcastCostParameters,
+              hashJoinCostParameters,
               left,
               right,
               leftRowCount,
@@ -179,10 +187,22 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) e
               buildSide,
               plan._1.schema.fields.length).get
           case SortMergeJoinExec(_, _, _, _, left, right, leftRowCount, rightRowCount, _) =>
+            val sortCostParameters = SortCostParameters(
+              sparkSession.sqlContext.conf.physicalCboSortParameterA,
+              sparkSession.sqlContext.conf.physicalCboSortParameterB,
+              sparkSession.sqlContext.conf.physicalCboSortParameterC)
+            val exchangeCostParameters = ExchangeCostParameters(
+              sparkSession.sqlContext.conf.physicalCboExchangeParameterA,
+              sparkSession.sqlContext.conf.physicalCboExchangeParameterB,
+              sparkSession.sqlContext.conf.physicalCboExchangeParameterC)
+            val smjCostParameters = SortMergeJoinCostParameters(
+              sparkSession.sqlContext.conf.physicalCboSortMergeJoinParameterA,
+              sparkSession.sqlContext.conf.physicalCboSortMergeJoinParameterB,
+              sparkSession.sqlContext.conf.physicalCboSortMergeJoinParameterC)
             cost = cost + new SortMergeJoinPhysicalCost(
-              sparkSession.sqlContext.conf.physicalCboExchangeWeight,
-              sparkSession.sqlContext.conf.physicalCboSortWeight,
-              sparkSession.sqlContext.conf.physicalCboSortMergeJoinWeight,
+              exchangeCostParameters,
+              sortCostParameters,
+              smjCostParameters,
               left,
               right,
               leftRowCount,
